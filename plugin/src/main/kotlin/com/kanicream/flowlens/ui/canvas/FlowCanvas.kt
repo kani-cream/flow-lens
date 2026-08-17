@@ -67,6 +67,7 @@ class FlowCanvas : JComponent() {
             selectedNodeId = null
             zoom = 1.0
             onSelectionChanged(null)
+            onZoomChanged()
         }
         rebuild()
     }
@@ -94,6 +95,17 @@ class FlowCanvas : JComponent() {
         return true
     }
 
+    /** Current zoom as a percentage, for the toolbar indicator. */
+    val zoomPercent: Int get() = (zoom * 100).roundToInt()
+
+    var onZoomChanged: () -> Unit = {}
+
+    fun zoomIn() = applyZoom(zoom * ZOOM_STEP)
+
+    fun zoomOut() = applyZoom(zoom / ZOOM_STEP)
+
+    fun resetZoom() = applyZoom(1.0)
+
     fun fitToView() {
         val bounds = rootVM?.bounds ?: return
         val viewport = visibleRect.takeIf { it.width > 0 && it.height > 0 } ?: return
@@ -106,6 +118,33 @@ class FlowCanvas : JComponent() {
         zoom = (zoom * scale).coerceIn(MIN_ZOOM, MAX_ZOOM)
         refreshGeometry()
         scrollRectToVisible(Rectangle(0, 0, 1, 1))
+        onZoomChanged()
+    }
+
+    /** Zooms around the viewport centre so the content under the eye stays put. */
+    private fun applyZoom(target: Double) {
+        val clamped = target.coerceIn(MIN_ZOOM, MAX_ZOOM)
+        if (clamped == zoom) return
+        val viewport = visibleRect
+        val centerX = (viewport.x + viewport.width / 2) / totalScale()
+        val centerY = (viewport.y + viewport.height / 2) / totalScale()
+        zoom = clamped
+        refreshGeometry()
+        onZoomChanged()
+        if (viewport.width <= 0 || viewport.height <= 0) return
+        // The scroll pane needs the new preferred size before the viewport can be
+        // repositioned, so recentre after this layout pass.
+        SwingUtilities.invokeLater {
+            val scale = totalScale()
+            scrollRectToVisible(
+                Rectangle(
+                    max(0, (centerX * scale - viewport.width / 2).roundToInt()),
+                    max(0, (centerY * scale - viewport.height / 2).roundToInt()),
+                    viewport.width,
+                    viewport.height,
+                ),
+            )
+        }
     }
 
     override fun getPreferredSize(): Dimension {
@@ -364,9 +403,7 @@ class FlowCanvas : JComponent() {
 
             override fun mouseWheelMoved(e: MouseWheelEvent) {
                 if (e.isControlDown || e.isMetaDown) {
-                    val factor = if (e.wheelRotation < 0) 1.1 else 1 / 1.1
-                    zoom = (zoom * factor).coerceIn(MIN_ZOOM, MAX_ZOOM)
-                    refreshGeometry()
+                    if (e.wheelRotation < 0) zoomIn() else zoomOut()
                 } else {
                     parent?.dispatchEvent(SwingUtilities.convertMouseEvent(this@FlowCanvas, e, parent))
                 }
@@ -394,6 +431,20 @@ class FlowCanvas : JComponent() {
                     e.keyCode == KeyEvent.VK_SPACE -> selectedCard()?.let(::toggleExpansion) == true
                     e.keyCode == KeyEvent.VK_RIGHT -> selectedCard()?.let(::expand) == true
                     e.keyCode == KeyEvent.VK_LEFT -> selectedCard()?.let(::collapse) == true
+                    isZoomShortcut(e) && (e.keyCode == KeyEvent.VK_EQUALS ||
+                        e.keyCode == KeyEvent.VK_PLUS || e.keyCode == KeyEvent.VK_ADD) -> {
+                        zoomIn()
+                        true
+                    }
+                    isZoomShortcut(e) && (e.keyCode == KeyEvent.VK_MINUS ||
+                        e.keyCode == KeyEvent.VK_SUBTRACT) -> {
+                        zoomOut()
+                        true
+                    }
+                    isZoomShortcut(e) && e.keyCode == KeyEvent.VK_0 -> {
+                        resetZoom()
+                        true
+                    }
                     e.keyCode == KeyEvent.VK_ESCAPE -> {
                         val hadSelection = selectedNodeId != null
                         select(null)
@@ -405,6 +456,8 @@ class FlowCanvas : JComponent() {
             }
         })
     }
+
+    private fun isZoomShortcut(e: KeyEvent): Boolean = e.isControlDown || e.isMetaDown
 
     /** Returns true when the selection actually moved. */
     private fun moveSelection(delta: Int): Boolean {
@@ -500,6 +553,7 @@ class FlowCanvas : JComponent() {
     companion object {
         private const val MIN_ZOOM = 0.25
         private const val MAX_ZOOM = 2.5
+        private const val ZOOM_STEP = 1.2
         private val SOLID_STROKE = BasicStroke(1.4f)
         private val DASHED_STROKE = BasicStroke(
             1.4f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, floatArrayOf(4f, 4f), 0f,

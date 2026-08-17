@@ -40,10 +40,15 @@ class FlowDetailsPanel(
             add(subtitle)
         }
         add(header, BorderLayout.NORTH)
-        add(JBScrollPane(rows).apply {
-            border = JBUI.Borders.empty()
-            preferredSize = Dimension(0, JBUI.scale(84))
-        }, BorderLayout.CENTER)
+        // No fixed height: the splitter above decides how much room the details
+        // get, so a long detail list can be shown without scrolling.
+        add(
+            JBScrollPane(rows).apply {
+                border = JBUI.Borders.empty()
+                minimumSize = Dimension(0, JBUI.scale(40))
+            },
+            BorderLayout.CENTER,
+        )
         add(
             JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply {
                 add(openCallSite)

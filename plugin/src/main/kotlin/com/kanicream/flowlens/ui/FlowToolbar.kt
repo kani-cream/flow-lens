@@ -8,6 +8,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
+import com.intellij.openapi.actionSystem.ex.ActionUtil
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
@@ -34,6 +35,10 @@ class FlowToolbar(
         fun analyzeAtCaret()
         fun stop()
         fun fitToView()
+        fun zoomIn()
+        fun zoomOut()
+        fun resetZoom()
+        fun zoomPercent(): Int
         fun isRunning(): Boolean
         fun canAnalyze(): Boolean
     }
@@ -42,6 +47,9 @@ class FlowToolbar(
         AnalyzeAction(),
         StopAction(),
         Separator.getInstance(),
+        ZoomOutAction(),
+        ZoomLevelAction(),
+        ZoomInAction(),
         FitAction(),
         Separator.getInstance(),
         SettingsAction(),
@@ -80,6 +88,39 @@ class FlowToolbar(
         }
 
         override fun actionPerformed(e: AnActionEvent) = commands.stop()
+    }
+
+    private inner class ZoomOutAction : AnAction(
+        FlowLensBundle.message("action.zoom.out.text"),
+        FlowLensBundle.message("action.zoom.out.description"),
+        AllIcons.General.ZoomOut,
+    ), DumbAware {
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+
+        override fun actionPerformed(e: AnActionEvent) = commands.zoomOut()
+    }
+
+    private inner class ZoomInAction : AnAction(
+        FlowLensBundle.message("action.zoom.in.text"),
+        FlowLensBundle.message("action.zoom.in.description"),
+        AllIcons.General.ZoomIn,
+    ), DumbAware {
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+
+        override fun actionPerformed(e: AnActionEvent) = commands.zoomIn()
+    }
+
+    /** The current zoom, shown as text; clicking it returns to 100%. */
+    private inner class ZoomLevelAction : AnAction(), DumbAware {
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+
+        override fun update(e: AnActionEvent) {
+            e.presentation.text = FlowLensBundle.message("action.zoom.level.text", commands.zoomPercent())
+            e.presentation.description = FlowLensBundle.message("action.zoom.reset.description")
+            e.presentation.putClientProperty(ActionUtil.SHOW_TEXT_IN_TOOLBAR, true)
+        }
+
+        override fun actionPerformed(e: AnActionEvent) = commands.resetZoom()
     }
 
     private inner class FitAction : AnAction(

@@ -3,6 +3,7 @@ package com.kanicream.flowlens.ui
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
+import com.intellij.ui.JBSplitter
 import com.intellij.ui.components.JBScrollPane
 import java.awt.BorderLayout
 import javax.swing.JPanel
@@ -10,6 +11,10 @@ import javax.swing.JPanel
 /**
  * Tool-window content: pure composition of the toolbar, status strip, canvas,
  * and details panel. Behavior lives in [FlowLensController].
+ *
+ * Canvas and details share a draggable splitter rather than a fixed-height
+ * footer: how much room the details of a selected node deserve depends on the
+ * node, and the proportion is remembered per IDE installation.
  */
 class FlowLensPanel(project: Project) : JPanel(BorderLayout()), Disposable {
 
@@ -23,9 +28,19 @@ class FlowLensPanel(project: Project) : JPanel(BorderLayout()), Disposable {
             add(controller.statusView, BorderLayout.CENTER)
         }
         add(header, BorderLayout.NORTH)
-        add(JBScrollPane(controller.canvas), BorderLayout.CENTER)
-        add(controller.detailsPanel, BorderLayout.SOUTH)
+        add(
+            JBSplitter(true, SPLITTER_KEY, DEFAULT_CANVAS_PROPORTION).apply {
+                firstComponent = JBScrollPane(controller.canvas)
+                secondComponent = controller.detailsPanel
+            },
+            BorderLayout.CENTER,
+        )
     }
 
     override fun dispose() = Unit
+
+    private companion object {
+        const val SPLITTER_KEY = "FlowLens.canvasDetailsSplitter"
+        const val DEFAULT_CANVAS_PROPORTION = 0.72f
+    }
 }

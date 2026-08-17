@@ -65,6 +65,14 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
 
     override fun fitToView() = canvas.fitToView()
 
+    override fun zoomIn() = canvas.zoomIn()
+
+    override fun zoomOut() = canvas.zoomOut()
+
+    override fun resetZoom() = canvas.resetZoom()
+
+    override fun zoomPercent(): Int = canvas.zoomPercent
+
     override fun isRunning(): Boolean = running
 
     override fun canAnalyze(): Boolean =
