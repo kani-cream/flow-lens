@@ -23,6 +23,7 @@ import java.awt.event.MouseEvent
 import java.awt.event.MouseWheelEvent
 import java.awt.geom.AffineTransform
 import javax.swing.JComponent
+import javax.swing.JViewport
 import javax.swing.SwingUtilities
 import kotlin.math.max
 import kotlin.math.min
@@ -100,30 +101,47 @@ class FlowCanvas : JComponent() {
 
     var onZoomChanged: () -> Unit = {}
 
-    fun zoomIn() = applyZoom(zoom * ZOOM_STEP)
+    fun zoomIn() = applyZoom(zoom * CanvasZoom.STEP)
 
-    fun zoomOut() = applyZoom(zoom / ZOOM_STEP)
+    fun zoomOut() = applyZoom(zoom / CanvasZoom.STEP)
 
     fun resetZoom() = applyZoom(1.0)
 
+    /**
+     * Scales the map so the whole flow fits the viewport. The target zoom is
+     * derived from content and viewport size only, so pressing Fit repeatedly
+     * always lands on the same result.
+     */
     fun fitToView() {
         val bounds = rootVM?.bounds ?: return
-        val viewport = visibleRect.takeIf { it.width > 0 && it.height > 0 } ?: return
-        val contentW = bounds.x + bounds.width + CanvasMetrics.CANVAS_MARGIN
-        val contentH = bounds.y + bounds.height + CanvasMetrics.CANVAS_MARGIN
-        val scale = min(
-            viewport.width.toDouble() / scaled(contentW),
-            viewport.height.toDouble() / scaled(contentH),
-        )
-        zoom = (zoom * scale).coerceIn(MIN_ZOOM, MAX_ZOOM)
+        val viewport = viewportSize() ?: return
+        val target = CanvasZoom.fitZoom(
+            contentWidth = bounds.x + bounds.width + CanvasMetrics.CANVAS_MARGIN,
+            contentHeight = bounds.y + bounds.height + CanvasMetrics.CANVAS_MARGIN,
+            viewportWidth = viewport.width,
+            viewportHeight = viewport.height,
+            uiScale = JBUIScale.scale(1f).toDouble(),
+        ) ?: return
+        zoom = target
         refreshGeometry()
-        scrollRectToVisible(Rectangle(0, 0, 1, 1))
         onZoomChanged()
+        // Fitting shows everything, so the map starts at its origin.
+        SwingUtilities.invokeLater { scrollRectToVisible(Rectangle(0, 0, 1, 1)) }
+    }
+
+    /**
+     * The space actually available for the map. `visibleRect` reports the
+     * component's own visible part, which collapses to the content size when the
+     * content is smaller than the window and would make fitting meaningless.
+     */
+    private fun viewportSize(): Dimension? {
+        val extent = (parent as? JViewport)?.extentSize ?: visibleRect.size
+        return extent.takeIf { it.width > 0 && it.height > 0 }
     }
 
     /** Zooms around the viewport centre so the content under the eye stays put. */
     private fun applyZoom(target: Double) {
-        val clamped = target.coerceIn(MIN_ZOOM, MAX_ZOOM)
+        val clamped = CanvasZoom.clamp(target)
         if (clamped == zoom) return
         val viewport = visibleRect
         val centerX = (viewport.x + viewport.width / 2) / totalScale()
@@ -551,9 +569,6 @@ class FlowCanvas : JComponent() {
     }
 
     companion object {
-        private const val MIN_ZOOM = 0.25
-        private const val MAX_ZOOM = 2.5
-        private const val ZOOM_STEP = 1.2
         private val SOLID_STROKE = BasicStroke(1.4f)
         private val DASHED_STROKE = BasicStroke(
             1.4f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, floatArrayOf(4f, 4f), 0f,
