@@ -2,45 +2,73 @@
 
 ## 1. Product Statement
 
-**Flow Lens is an IntelliJ Platform plugin that turns a selected function or method into an explorable static execution-flow map.**
+**Flow Lens is an IntelliJ IDEA Ultimate plugin that turns a selected function or method into an explorable static execution-flow map.**
 
-The user chooses one entry point. Flow Lens follows the reachable code within bounded limits, preserves meaningful execution order, exposes uncertainty instead of hiding it, and presents the result as a visual map that can be explored and navigated back to source.
+The user chooses one entry point. Flow Lens follows reachable code within bounded limits, preserves meaningful evaluation/execution order, exposes uncertainty instead of hiding it, and presents the result as a visual map that can be explored and navigated back to source.
 
 > Select a method. See where the code flows.
 
-The product is intentionally not a repository-wide analyzer and not a runtime tracer. It is a focused source-understanding tool for reading unfamiliar code, debugging, code review, onboarding, and investigation.
+Flow Lens is intentionally not a repository-wide analyzer and not a runtime tracer. It is a focused source-understanding tool for reading unfamiliar code, debugging, code review, onboarding, and investigation.
 
 ---
 
-## 2. Official Target Languages
+## 2. Target IDE and Languages
 
-Flow Lens targets these languages as first-class product languages:
+### Target IDE
+
+The primary and supported v0.1 host is:
+
+- **IntelliJ IDEA Ultimate**
+
+Other JetBrains IDEs such as GoLand, Android Studio, and remote/client-only environments are not required for v0.1 compatibility.
+
+The exact minimum IntelliJ IDEA Ultimate build supported by the first release will be fixed during the initial build/prototype milestone and recorded in the build configuration.
+
+### Official target languages
+
+Flow Lens treats these as first-class product languages:
 
 - **Java**
 - **Kotlin**
 - **Go**
 
-The visualization and persistence layers must remain language-neutral. Language-specific behavior belongs behind analyzer adapters.
+Go support is available when the JetBrains Go language plugin is installed and compatible with the target IntelliJ IDEA Ultimate build.
+
+The visualization, navigation abstraction, persistence, and shared analysis model must remain language-neutral. Language-specific PSI/API types stay behind analyzer adapters.
 
 Conceptual architecture:
 
 ```text
-                    FlowAnalysisEngine
-                           │
-          ┌────────────────┼────────────────┐
-          │                │                │
-   Java Analyzer     Kotlin Analyzer     Go Analyzer
-          │                │                │
-          └────────────────┼────────────────┘
-                           ↓
-                  FlowAnalysisResult
-                           ↓
-                     Flow Canvas
+                         FlowAnalysisEngine
+                                │
+                     AnalyzerRegistry
+                                │
+          ┌─────────────────────┼─────────────────────┐
+          │                     │                     │
+   Java Analyzer         Kotlin Analyzer          Go Analyzer
+          │                     │                     │
+          └─────────────────────┼─────────────────────┘
+                                ↓
+                       FlowAnalysisResult
+                                ↓
+                           Flow Canvas
 ```
 
-Java and Kotlin may share JVM/UAST utilities where that improves consistency, but language-specific PSI or analysis APIs may be used where they produce more accurate results. Go support should be isolated behind its own analyzer so the core model and UI do not depend on Go-specific PSI types.
+Analysis may cross language boundaries. The analyzer used for the root declaration does not remain fixed for the whole traversal.
 
-A language must not be advertised as supported unless entry-point detection, call extraction, resolution, source navigation, cycle handling, and core Flow Canvas rendering work reliably for that language.
+Example:
+
+```text
+Java Controller
+      ↓
+Kotlin Service
+      ↓
+Java Repository
+```
+
+Each resolved target is dispatched through `AnalyzerRegistry` according to the target declaration language.
+
+A language must not be advertised as supported unless entry-point detection, explicit-call extraction, resolution, source navigation, cycle handling, mixed-language dispatch where applicable, and core Flow Canvas rendering work reliably for that language.
 
 ---
 
@@ -50,19 +78,21 @@ A language must not be advertised as supported unless entry-point detection, cal
 
 - Analyze exactly one user-selected method/function as the entry point.
 - Follow project-local calls recursively within explicit limits.
-- Preserve **evaluation/execution order**, not merely lexical or declaration order.
-- Represent the same target being called multiple times as separate call-site events.
-- Show external, unresolved, ambiguous, cyclic, and truncated paths explicitly.
-- Navigate from any source-backed visual element to code.
+- Preserve evaluation/execution order where the language semantics and IDE model allow it.
+- Represent repeated calls to the same symbol as separate call-site events.
+- Distinguish call-site identity from target-symbol identity.
+- Show external, unresolved, ambiguous, cyclic, declared-target, and truncated paths explicitly.
+- Navigate both to the call site and, where known, the target declaration.
 - Keep analysis cancellable and responsive on real-world projects.
 - Work locally without requiring an AI service or external server.
-- Make the analysis visibly progress as the Flow Canvas grows.
+- Make analysis progress visible as the Flow Canvas grows.
+- Allow Java, Kotlin, and Go to converge into one shared semantic model without pretending their language semantics are identical.
 
 ### Product differentiation
 
 Flow Lens must not become a prettier Call Hierarchy.
 
-The primary experience is a **semantic Flow Map**: calls, boundaries, branches, loops, async work, ambiguity, and depth are represented differently so that the user can understand the character of the flow at a glance.
+The primary experience is a **semantic Flow Map**. Calls, nested function frames, boundaries, branches, loops, async/deferred execution, ambiguity, and depth use distinct visual language so that the user can understand the character of the flow at a glance.
 
 Visual quality is a core product requirement, not a later polish task.
 
@@ -76,31 +106,48 @@ The initial product does not attempt to provide:
 - Guaranteed runtime-accurate execution traces.
 - Full symbolic execution.
 - Runtime instrumentation or profiling.
-- Perfect resolution of reflection, framework magic, dynamic proxies, runtime DI configuration, or generated behavior.
-- Automatic selection of one implementation when multiple targets are plausible.
+- Perfect resolution of reflection, framework magic, runtime dependency injection, generated behavior, or dynamic proxies.
+- Complete compiler-desugared/implicit call reconstruction.
+- Complete Java/Kotlin async semantics.
+- Complete Go goroutine/channel semantics.
+- Automatic selection of one runtime implementation when multiple targets are genuinely plausible.
 - A replacement for IntelliJ Bookmarks or Call Hierarchy.
 
-Flow Lens must prefer an explicit `AMBIGUOUS`, `UNRESOLVED`, `EXTERNAL`, or `LIMIT_REACHED` result over false certainty.
+Flow Lens must prefer explicit uncertainty over false certainty.
 
 ---
 
 ## 5. Entry Point and Analysis Semantics
 
-Every analysis starts from exactly one function-like declaration.
+Every analysis starts from exactly one supported function-like declaration.
 
-For the initial implementation, supported entry points are:
+Initial entry points:
 
 - Java methods and constructors.
-- Kotlin named functions and constructors where resolvable.
-- Go functions and methods.
+- Kotlin named functions and constructors with an analyzable explicit body.
+- Go package functions and methods.
 
-The caret may be anywhere inside the supported declaration or its signature. The containing supported declaration becomes the entry point.
+The caret may be anywhere inside the supported declaration or its signature. Unsupported constructs fail clearly rather than guessing.
 
-Unsupported constructs should fail clearly rather than guessing.
+### Explicit-call scope
+
+v0.1 is primarily an **explicit callable-flow analyzer**.
+
+Compiler-generated or implicit calls are not assumed to exist in the flow unless a language analyzer explicitly supports and tests them.
+
+Examples not automatically expanded in v0.1:
+
+- Kotlin property getter/setter invocation implied by property syntax.
+- Kotlin default-argument machinery not represented as an explicit supported semantic case.
+- delegated-property expansion.
+- Java/Kotlin implicit constructor initialization chains beyond the explicit body rules.
+- framework-generated proxies and injected runtime targets.
+
+This limitation must not prevent later analyzers from adding richer semantics.
 
 ### Evaluation order
 
-"Source order" means the language's meaningful expression evaluation order where Flow Lens can determine it.
+"Source order" means meaningful language evaluation order, not naive PSI preorder.
 
 Example:
 
@@ -108,7 +155,7 @@ Example:
 save(convert(load(id)));
 ```
 
-Expected conceptual order:
+Conceptual order:
 
 ```text
 load(id)
@@ -134,342 +181,459 @@ b()
 foo()
 ```
 
-A simple PSI preorder that produces `foo → a → b` is incorrect for Flow Lens.
-
-### Call site versus symbol
-
-A visual flow node represents an **event at a call site**, not a globally unique method symbol.
-
-```text
-FlowNode
-  ├─ callSite
-  ├─ targetSymbol
-  ├─ sourceLocation
-  └─ nodeType
-```
-
-If one symbol is called three times, the map contains three call nodes even though they may reference the same target symbol.
+If ordering cannot be established safely, the result carries an ordering status rather than inventing certainty.
 
 ---
 
 ## 6. Shared Analysis Model
 
-The renderer consumes a language-neutral model.
+The shared model separates orthogonal concepts. Node kind must not duplicate resolution state.
 
-Core concepts:
+### 6.1 Result state
 
 ```text
 FlowAnalysisResult
-FlowGraph
-FlowNode
-FlowEdge
-FlowSymbol
-FlowSourceLocation
+- status
+- rootFrame
+- nodeCount
+- controlFlowIncomplete
+- sourceRevision / modification marker
+- diagnostics
 ```
 
-Planned node types:
+Result status:
 
-- `ENTRY`
-- `METHOD_CALL`
-- `CONSTRUCTOR_CALL`
-- `CONDITION`
-- `SWITCH`
-- `LOOP`
-- `RETURN`
-- `THROW`
-- `TRY`
-- `CATCH`
-- `FINALLY`
-- `ASYNC_BOUNDARY`
-- `EXTERNAL_CALL`
-- `AMBIGUOUS_CALL`
-- `UNRESOLVED_CALL`
-- `CYCLE`
-- `LIMIT_REACHED`
-- `CANCELLED`
+```text
+RUNNING
+COMPLETED
+TRUNCATED
+CANCELLED
+STALE
+FAILED
+```
 
-Planned edge semantics:
+`CANCELLED` and `FAILED` are analysis-result states, not node kinds.
 
-- Normal execution.
-- Call.
-- Return.
-- True branch.
-- False branch.
-- Switch/case branch.
-- Loop body/back edge.
-- Exception path.
-- Async fork.
-- Ambiguous candidate.
+### 6.2 Frames and call sites
 
-The internal model must be rich enough for future Flow, Graph, Sequence, and export views without re-running analysis for each renderer.
+Nested expansion requires a first-class callable-body container.
+
+```text
+FlowFrame
+- symbol
+- entryLocation
+- depth
+- events[]
+```
+
+A call-site event may own a child frame when the target body has been analyzed:
+
+```text
+FlowNode
+- id
+- kind
+- callSiteLocation
+- targetSymbol?
+- targetFrame?
+- depth
+- resolutionStatus
+- dispatchConfidence
+- executionMode
+- orderingStatus
+- metadata
+```
+
+This permits the UI to collapse a call to one compact card or expand the analyzed target body inline without losing call-site identity.
+
+The same target symbol called twice produces two distinct call nodes, even if their analyzed body can internally reuse cached extraction data.
+
+### 6.3 Node kind
+
+```text
+ENTRY
+CALL
+CONSTRUCTOR
+CONDITION
+SWITCH
+LOOP
+RETURN
+THROW
+TRY
+CATCH
+FINALLY
+CYCLE
+LIMIT
+STATUS
+```
+
+### 6.4 Resolution status
+
+```text
+PROJECT_LOCAL
+EXTERNAL
+UNRESOLVED
+BUILT_IN
+```
+
+Ambiguity is represented through dispatch confidence rather than duplicating it as a node type.
+
+### 6.5 Dispatch confidence
+
+```text
+EXACT
+DECLARED_TARGET
+AMBIGUOUS
+UNKNOWN
+```
+
+Meaning:
+
+- `EXACT`: the analyzer can justify a single target for the call semantics being modeled.
+- `DECLARED_TARGET`: a concrete declared target body is available and useful to analyze, but runtime overriding/dispatch may select another implementation.
+- `AMBIGUOUS`: there is no single body that Flow Lens can responsibly select as the analyzed continuation.
+- `UNKNOWN`: target confidence could not be classified reliably.
+
+For `DECLARED_TARGET`, Flow Lens may analyze the declared implementation but must visually indicate that runtime override is possible.
+
+For `AMBIGUOUS`, v0.1 stops recursive traversal at that call. Candidate exploration is a later milestone.
+
+### 6.6 Execution mode
+
+```text
+SYNC
+ASYNC
+GOROUTINE
+DEFERRED
+UNKNOWN
+```
+
+v0.1 does not need full parallel/deferred lane rendering, but known execution semantics such as Go `go f()` and `defer f()` must be preserved as metadata instead of being lost.
+
+### 6.7 Ordering status
+
+```text
+DETERMINISTIC
+APPROXIMATE
+UNSPECIFIED
+```
+
+The renderer must not draw an ordinary certain sequential connector when the model says ordering is approximate or unspecified.
 
 ---
 
-## 7. Resolution Rules
+## 7. Resolution Policy
 
-### Project-local
+### Exact cases
 
-Calls resolved to project content may be recursively analyzed up to configured limits.
+Typical cases expected to be `EXACT` when resolvable include:
 
-### External
+- static functions/methods.
+- private/final non-overridable methods where language semantics justify it.
+- constructors.
+- Java `super.method()` style explicit superclass dispatch.
+- Kotlin top-level functions.
+- Go package functions.
+- other analyzer-specific cases where one target is statically established.
 
-Dependency and SDK/library calls stop by default and render as terminal calls beyond a visible project boundary.
+### Declared target
+
+For ordinary virtual methods where IntelliJ resolves a concrete declared body but runtime overriding remains possible, Flow Lens may continue into the declared body with:
+
+```text
+resolutionStatus = PROJECT_LOCAL
+dispatchConfidence = DECLARED_TARGET
+```
+
+The UI must not present this as guaranteed runtime dispatch.
 
 ### Ambiguous
 
-If static analysis cannot determine one target with sufficient confidence, Flow Lens must not silently pick an implementation.
+Use `AMBIGUOUS` when no responsible single continuation can be chosen, for example an interface/abstract contract with multiple plausible implementations and no concrete body suitable as the analyzed continuation.
 
-In v0.1 the call is marked `AMBIGUOUS` and recursive traversal stops there. Later versions may display and selectively expand candidates.
+v0.1 stops there.
 
 ### Unresolved
 
-If the IDE cannot resolve the target, create an `UNRESOLVED_CALL` tied to the call site and continue analysis of other paths.
+If no reliable target can be found:
 
-### Cycles
+- retain the call-site node.
+- mark it `UNRESOLVED`.
+- continue analyzing unrelated events.
 
-Cycle detection is traversal-path based, not global. The same symbol may legitimately appear in separate branches or separate call sites.
+One failed call must not fail the entire analysis.
 
----
+### External
 
-## 8. Analysis Limits
-
-The default settings are fixed as:
-
-```text
-Max method depth          3
-Max total nodes         100
-Project sources only     ON
-Include tests           OFF
-Include libraries       OFF
-```
-
-**Depth counts method/function boundaries only.** Structural visual nodes such as conditions do not consume recursive depth.
-
-When a limit is reached, Flow Lens inserts a visible `LIMIT_REACHED` terminal marker. It must never silently truncate a map.
-
-Only one active analysis is allowed per project in v0.1. Starting a new analysis cancels the previous one.
-
-If the user cancels analysis, already-produced nodes remain visible and the result is marked partial/cancelled.
+Dependency, SDK, JDK/runtime, and other non-project calls are terminal by default. External source navigation may still be offered when IntelliJ can navigate to it.
 
 ---
 
-## 9. Flow Canvas — Primary Visualization
-
-The primary v0.1 visualization is **Flow Canvas**, hosted in the Flow Lens Tool Window.
-
-A plain Swing tree or a linear `A → B → C` visualization is not considered the target user experience.
-
-The canvas begins with a vertical top-to-bottom reading direction but uses semantic visual structures rather than identical boxes and arrows.
-
-Core visual language:
-
-- Entry point: prominent entry card.
-- Method/function call: compact callable card.
-- Nested expansion: a method can visually open to reveal its internal flow.
-- Condition: split/fan-out structure.
-- Loop: bounded container with a visible iteration/back-edge concept.
-- Async: separate lane/fork instead of a normal synchronous connector.
-- External code: rendered beyond a project boundary.
-- Ambiguous target: fan-out/possibility treatment, not an error treatment.
-- Unresolved target: broken/unknown endpoint.
-- Depth/node limit: explicit continuation/truncation marker.
-- Cycle: back-reference instead of recursively duplicating forever.
-
-The visual grammar is defined separately in `plan/VISUAL_DESIGN.md`.
-
-### Progressive analysis
-
-The canvas should grow as analysis completes:
-
-```text
-Entry
-  ↓
-resolved call
-  ↓
-resolving…
-```
-
-Counters update during analysis, for example:
-
-```text
-26 nodes · 12 project calls · 3 external · 1 ambiguous
-```
-
-This is functional feedback, not decorative animation.
-
----
-
-## 10. Tool Window and Interaction
-
-v0.1 uses a dedicated **Tool Window**, not an editor tab.
-
-Primary interactions:
-
-- `Flow Lens > Analyze Execution Flow` from the editor context menu.
-- `Analyze Current Method` in the Tool Window.
-- Single click: select a visual element and show details.
-- Double click / Enter: navigate to source.
-- Context action: `Open Source`.
-- Context action: `Analyze from Here`.
-- Context action: `Pin Method` when Flow Pins are available.
-- Expand/collapse nested method flow.
-- Fit canvas to viewport.
-- Zoom/pan if required by the chosen canvas implementation.
-
-The current flow is ephemeral in v0.1 and is not required to survive IDE restart.
-
----
-
-## 11. Flow Pins and Saved Flows
-
-These are workflow features, not generic bookmarks.
-
-### Flow Pins
-
-A Flow Pin is a named function/method entry point used for quick navigation and re-analysis.
-
-Possible metadata:
-
-- User-defined name.
-- Stable symbol reference where possible.
-- File path/signature fallback.
-- Optional note.
-- Date pinned.
-
-### Saved Flows
-
-A Saved Flow stores:
-
-- Entry point.
-- User-defined name.
-- Analysis settings.
-- Later: candidate choices for ambiguous calls.
-- Later: collapsed/expanded UI state.
-
-The graph itself may be regenerated rather than permanently persisted.
-
----
-
-## 12. Language-Specific Future Semantics
-
-The shared model should anticipate asynchronous and language-specific constructs without pretending they are synchronous.
-
-Examples:
+## 8. Language-Specific v0.1 Semantics
 
 ### Java
 
-- Executor / CompletableFuture patterns may later create `ASYNC_BOUNDARY` nodes where reliably recognizable.
+Support explicit methods, constructors, normal method calls, static calls, `new`, explicit `this(...)`, and explicit `super(...)` constructor invocations.
+
+Constructor analysis in v0.1 covers explicit constructor body semantics Flow Lens can observe reliably. It does not promise reconstruction of every implicit field/initializer/super-initialization step.
 
 ### Kotlin
 
-- `launch`, `async`, coroutine boundaries, and suspend-related flow may later receive explicit async semantics.
+Support named top-level/member functions, analyzable constructors, normal/member/extension calls, and explicit constructor calls.
+
+v0.1 does not promise complete implicit/compiler-generated callable expansion. Property accessors, delegated properties, default arguments, operators, and generated bridges are only shown when deliberately implemented and tested.
 
 ### Go
 
-- `go f()` should eventually render as a goroutine fork/lane rather than a normal call.
-- Channel-related flow may be explored later, but complete concurrency modeling is not an initial goal.
+Support package functions, receiver methods, and ordinary calls.
 
-These advanced semantics are outside v0.1 unless implementation proves straightforward. The analyzer architecture must not block them.
+Preserve:
+
+- `go f()` as `executionMode = GOROUTINE`.
+- `defer f()` as `executionMode = DEFERRED`.
+
+For a deferred call, argument-expression evaluation events remain ordered where language semantics define them, while the deferred target invocation itself must not be presented as an ordinary immediate synchronous continuation.
+
+Go built-ins may be represented as built-in terminal operations.
 
 ---
 
-## 13. Architecture
+## 9. Mixed-Language Dispatch
+
+Analyzer selection occurs per resolved callable, not only once at the root.
+
+Conceptual API:
 
 ```text
-flow-lens
-├─ analysis
-│  ├─ core
-│  ├─ java
-│  ├─ kotlin
-│  ├─ go
-│  ├─ resolution
-│  ├─ traversal
-│  └─ limits
-├─ model
-│  ├─ FlowAnalysisResult
-│  ├─ FlowGraph
-│  ├─ FlowNode
-│  ├─ FlowEdge
-│  ├─ FlowSymbol
-│  └─ FlowSourceLocation
-├─ ui
-│  ├─ toolwindow
-│  ├─ canvas
-│  ├─ layout
-│  ├─ components
-│  └─ details
-├─ navigation
-├─ persistence
-│  ├─ pins
-│  └─ savedflows
-├─ export
-│  ├─ markdown
-│  └─ mermaid
-└─ settings
+FlowLanguageAnalyzerRegistry
+- findAnalyzer(element)
+- findAnalyzer(languageId)
+
+FlowLanguageAnalyzer
+- supports(element)
+- findEntryPoint(caret)
+- extractDirectFlow(callable)
+- resolveCall(callSite)
 ```
 
-Key boundaries:
+Java ↔ Kotlin transitions must be supported when IntelliJ resolves the target declaration across those languages.
 
-1. Analyzer code may depend on language-specific PSI/API types.
-2. `model` must not.
-3. Rendering consumes only the language-neutral analysis result.
-4. Export consumes the analysis model, never the rendered UI.
-5. Visual layout and visual semantics are separate from source-resolution logic.
+Go normally remains within Go source but still passes through the same analyzer registry and shared model.
 
 ---
 
-## 14. Performance and Threading
+## 10. Traversal and Progressive Analysis
 
-- Never run meaningful analysis synchronously on the EDT.
-- Use IntelliJ read-action and cancellation semantics correctly.
+Flow Lens uses a **local-first / breadth-first-biased** progressive strategy rather than diving deeply into the first branch before the root picture is known.
+
+Preferred progression:
+
+```text
+1. Extract root frame direct events.
+2. Render root frame.
+3. Resolve/analyze depth-1 project-local callees.
+4. Render/update their availability.
+5. Continue toward deeper levels within limits.
+```
+
+This keeps the initial map understandable and reduces disruptive canvas re-layout.
+
+The implementation may use internal scheduling that differs from strict BFS for performance, but user-visible progressive results should prioritize completing the current frame before deeply expanding one early branch.
+
+---
+
+## 11. Analysis Limits
+
+Defaults:
+
+```text
+Max method/function depth      3
+Max persistent semantic nodes 100
+Include tests                 OFF
+Include libraries             OFF
+```
+
+Depth counts callable-body crossings only. Conditions and visual containers do not consume recursive depth.
+
+### Node counting
+
+The 100-node budget counts persistent semantic model nodes.
+
+Transient UI-only states such as a temporary `resolving…` indicator do not count.
+
+The final reserved semantic slot may be used for a `LIMIT` node so the result never silently truncates.
+
+Limits are enforced during traversal.
+
+---
+
+## 12. Cycle Detection
+
+Cycle detection is based on the current callable traversal path, not global symbol deduplication.
+
+```text
+A.foo()
+  ↓
+B.bar()
+  ↓
+A.foo()
+  ↓
+CYCLE → A.foo()
+```
+
+The same symbol may appear again in another call site or independent path.
+
+---
+
+## 13. Indexing, Source Changes, and Analysis Lifetime
+
+Flow Lens must not convert temporary IDE indexing limitations into misleading `UNRESOLVED` results.
+
+When required indexes are unavailable:
+
+```text
+Waiting for IntelliJ indexes…
+```
+
+Analysis begins or resumes when the required smart/indexed state is available.
+
+If relevant source changes while an analysis is running and the existing result can no longer be trusted:
+
+- cancel/stop the affected analysis cooperatively.
+- mark the result `STALE`.
+- preserve already-rendered data for inspection when safe.
+- offer re-analysis rather than silently mixing old and new PSI state.
+
+Only one active analysis is allowed per project in v0.1.
+
+---
+
+## 14. Flow Canvas
+
+The primary v0.1 visualization is **Flow Canvas** in a dedicated Tool Window.
+
+A plain `JTree` or simple `A → B → C` call diagram is not the target experience.
+
+### Initial expansion policy
+
+At first presentation:
+
+- root `FlowFrame`: expanded.
+- direct call cards: visible.
+- child frames at depth 1+: collapsed by default.
+- deeper analyzed content may be available without being visually expanded.
+
+The user expands a call card to reveal its `targetFrame` inline.
+
+This prevents a 100-node analysis from opening as a 100-node wall.
+
+### External boundary
+
+`PROJECT BOUNDARY` is a semantic crossing local to an edge/call. It is not required to be one canvas-wide horizontal line.
+
+Example:
+
+```text
+HttpClient.post()
+      │
+      ║ PROJECT BOUNDARY
+      ▼
+okhttp.execute()
+```
+
+This remains correct inside nested frames and multiple external branches.
+
+Detailed rules live in `plan/VISUAL_DESIGN.md`.
+
+---
+
+## 15. Navigation
+
+Call nodes have two potentially distinct source destinations:
+
+1. **Target declaration** — where the resolved method/function is defined.
+2. **Call site** — where this specific event occurs.
+
+Default interaction:
+
+- Double click / Enter on a resolved call: open target declaration.
+- Context action: `Open Call Site`.
+- Context action: `Open Target` when known.
+- Unresolved call: navigation defaults to call site.
+- Entry card: opens entry declaration.
+
+This preserves the distinction between event identity and symbol identity.
+
+---
+
+## 16. Performance and Threading
+
+- Never perform meaningful traversal/resolution work on the EDT.
+- Use cancellable IntelliJ read/index access patterns.
 - Avoid whole-project scans during normal analysis.
-- Reuse indexes/reference-resolution facilities.
-- Enforce node/depth limits during traversal, not after building a huge graph.
-- Memoize repeated resolution work within one analysis when safe.
-- Do not recursively expand libraries by default.
-- Partial results must remain structurally valid while analysis is running.
+- Reuse IDE indexes and resolution APIs.
+- Enforce limits during traversal.
+- Memoize repeated direct-flow extraction/resolution within one analysis when safe.
+- Keep progressive partial results structurally valid.
+- Treat source modification and invalid PSI as a reason to revalidate/cancel rather than continue with stale assumptions.
+
+A dedicated benchmark fixture should eventually cover at least:
+
+- a medium Java project.
+- mixed Java/Kotlin project.
+- Go project.
+- 100-node limit behavior.
+- cancellation during resolution.
 
 ---
 
-## 15. Roadmap
+## 17. Roadmap
+
+### Milestone 0 — Feasibility prototypes
+
+Before product implementation is considered stable, prove independently:
+
+- Java entry detection + call resolution.
+- Kotlin entry detection + call resolution under the chosen IntelliJ baseline.
+- Go entry detection + call resolution with the Go plugin dependency.
+- Java ↔ Kotlin analyzer switching.
+- Flow Canvas prototype handling ~100 semantic nodes.
+- progressive layout without excessive reflow.
+
+This milestone may use disposable prototype code.
 
 ### v0.1 — Multi-language Method Flow + Flow Canvas
 
-Goal: prove the complete core experience on Java, Kotlin, and Go.
-
-Scope:
-
-- IntelliJ plugin skeleton.
+- IntelliJ IDEA Ultimate plugin skeleton.
+- analyzer registry.
 - Java analyzer.
 - Kotlin analyzer.
 - Go analyzer.
-- Current method/function detection.
-- Calls and constructors/functions in evaluation order.
-- Recursive project-local analysis.
-- Depth = method/function boundary.
-- Node limit.
-- Cycle detection.
-- External terminal nodes.
-- Unresolved terminal nodes.
-- Ambiguous terminal nodes without automatic implementation selection.
-- One active analysis per project.
-- Cancellation with partial results.
+- mixed Java/Kotlin traversal.
+- shared `FlowFrame` / `FlowNode` model.
+- evaluation-order-aware explicit calls.
+- resolution + dispatch confidence.
+- recursive project-local analysis.
+- depth/node limits.
+- cycle detection.
+- external/unresolved/ambiguous/declared-target states.
+- Go goroutine/defer metadata.
+- indexing wait + stale source handling.
+- cancellation with partial results.
 - Flow Canvas in Tool Window.
-- Semantic node/card styling.
-- Progressive canvas growth and counters.
-- Source navigation.
+- nested frame expansion.
+- progressive local-first rendering.
+- call-site and target navigation.
 
-Detailed semantics and acceptance cases are defined in `plan/V0.1_SPEC.md`.
+Detailed semantics are in `plan/V0.1_SPEC.md`.
 
 ### v0.2 — Control Flow
 
 - `if / else`.
-- Java/Kotlin switch/when concepts.
-- Go switch/select exploration as appropriate.
+- Java/Kotlin `switch`/`when`.
+- Go `switch` and selected `select` representation where appropriate.
 - loops.
-- `return`.
-- `throw` / panic-related representation where appropriate.
-- basic exception structures for JVM languages.
+- return/throw/panic-related termination.
+- JVM try/catch/finally.
 - branch merge visualization.
 - loop containers.
 
@@ -479,96 +643,102 @@ Detailed semantics and acceptance cases are defined in `plan/V0.1_SPEC.md`.
 - Saved Flows.
 - Recent analyses.
 - Analyze from selected node.
-- Persistent saved entry points.
-- Improved progress/status UX.
+- persistent saved entry points.
+- improved progress/status UX.
 
 ### v0.4 — Ambiguity and Sharing
 
-- Candidate implementation discovery and selective expansion.
+- candidate implementation discovery and selective expansion.
 - Markdown export.
 - Mermaid flowchart export.
-- Mermaid sequence export where valid.
-- Copy structured context for external AI/tools.
+- Mermaid sequence export where semantically valid.
+- copy structured context for external tools/AI.
 
 ### v0.5+ — Advanced Exploration
 
 - Sequence View.
-- Alternative/free Graph View.
-- Flow snapshot comparison.
-- Flow-change detection.
-- Framework-aware resolution helpers.
-- Async visualization for Java/Kotlin.
-- Goroutine visualization for Go.
-- Search/filter in large flows.
-- Selected-path highlighting.
-- Reverse/caller analysis.
-- Test discovery.
+- alternate/free Graph View.
+- flow snapshot comparison.
+- flow-change detection.
+- framework-aware resolution helpers.
+- async lanes for Java/Kotlin.
+- richer goroutine/channel visualization for Go.
+- search/filter.
+- selected-path highlighting.
+- reverse/caller analysis.
+- test discovery.
 - Git diff overlay.
 
 ---
 
-## 16. Fixed v0.1 Decisions
+## 18. Fixed v0.1 Decisions
 
-These are no longer open design questions:
-
-1. Supported product languages are Java, Kotlin, and Go.
-2. v0.1 aims to prove basic method/function flow for all three.
-3. The primary UI is a Tool Window.
-4. The primary visualization is Flow Canvas, not a plain tree.
-5. The default reading direction is top-to-bottom.
-6. Depth counts method/function boundaries only.
-7. Ambiguous targets are not automatically expanded in v0.1.
-8. Calls are represented per call site, not deduplicated by target symbol.
-9. Evaluation order is preferred over naive PSI lexical traversal.
-10. Tests and libraries are excluded from recursive analysis by default.
-11. One analysis runs per project at a time.
-12. The current flow does not need to persist across restart in v0.1.
-
----
-
-## 17. Remaining Open Questions
-
-These should be settled by focused prototypes because the correct answer depends on IntelliJ platform behavior or rendering feasibility:
-
-1. Exact PSI/UAST/API combination for each Java/Kotlin semantic case.
-2. Exact Go PSI/API integration boundary and plugin dependency arrangement.
-3. Canvas technology/layout engine capable of smooth nested expansion without fighting IntelliJ UI conventions.
-4. How aggressively layout should animate when nodes are inserted or expanded.
-5. Stable symbol persistence strategy for Flow Pins across refactors.
-6. Exact language-specific handling of lambdas, callbacks, coroutines, goroutines, and generated/framework code.
-7. Whether large flows should switch from automatic progressive layout to explicit user expansion at a threshold.
-
-Open questions must not redefine the product semantics already fixed above.
+1. Target IDE is **IntelliJ IDEA Ultimate**.
+2. Supported product languages are Java, Kotlin, and Go.
+3. Go support may depend on the JetBrains Go plugin being installed.
+4. Analyzer dispatch occurs per resolved target so mixed Java/Kotlin flows are possible.
+5. Primary UI is a Tool Window.
+6. Primary visualization is Flow Canvas, not a plain tree.
+7. Default reading direction is top-to-bottom.
+8. Root frame is expanded; child frames are collapsed initially.
+9. Depth counts callable-body boundaries only.
+10. Calls are represented per call site.
+11. Node kind, resolution, dispatch confidence, execution mode, and ordering are separate model dimensions.
+12. Ordinary resolvable virtual methods may use `DECLARED_TARGET`; genuinely non-selectable continuations use `AMBIGUOUS`.
+13. v0.1 is explicit-call focused and does not promise compiler-generated/implicit call reconstruction.
+14. Go `go` and `defer` semantics are preserved as execution metadata.
+15. Tests and libraries are excluded from recursive analysis by default.
+16. One analysis runs per project at a time.
+17. Indexing must not be misreported as unresolved code.
+18. Relevant source changes invalidate/stale an in-progress analysis.
+19. Current Flow does not need to persist across restart in v0.1.
 
 ---
 
-## 18. Product Principles
+## 19. Remaining Open Questions
+
+These remain prototype/implementation decisions rather than product-semantic decisions:
+
+1. Exact minimum IntelliJ IDEA Ultimate build for v0.1.
+2. Exact Java/Kotlin PSI/UAST/Analysis API combination per semantic case.
+3. Exact Go PSI/API integration and optional dependency packaging arrangement.
+4. Canvas technology/layout implementation.
+5. Motion amount and layout stabilization heuristics.
+6. Stable symbol persistence strategy for future Flow Pins across refactors.
+7. Which implicit/compiler-generated language constructs graduate into explicit support after v0.1.
+8. Threshold at which large analyzed child frames should require explicit expansion rather than eager background extraction.
+
+Open questions must not redefine the fixed semantics above.
+
+---
+
+## 20. Product Principles
 
 ### Explain uncertainty
 Never manufacture certainty static analysis does not have.
 
 ### Preserve meaning
-Execution order, branch structure, async boundaries, project boundaries, and ambiguity matter more than raw edge count.
+Execution order, dispatch confidence, execution mode, project boundaries, and later branch structure matter more than raw edge count.
 
 ### Visual semantics over decoration
-Animations and graphics must communicate analysis state or code meaning. Avoid motion that exists only to look busy.
+Motion and graphics must communicate code meaning or analysis state.
 
 ### Progressive disclosure
-Show a comprehensible map first and allow deeper exploration without overwhelming the canvas.
+Analyze enough to be useful, but do not visually explode everything at once.
 
 ### Language-neutral core
-Java, Kotlin, and Go should converge into one shared flow model and one visual language.
+Java, Kotlin, and Go share a model and visual grammar while keeping language-specific semantics in analyzers.
 
 ### IDE-native navigation
-The map is an alternate way to understand code, never a dead-end diagram. Every meaningful source-backed element should lead back to code.
+The map is never a dead-end diagram. It must lead back to code.
 
 ### Useful without AI
-AI integration is optional future interoperability. The product must be valuable on its own.
+AI interoperability is optional; the core product must remain valuable by itself.
 
 ---
 
-## 19. Planning Documents
+## 21. Planning Documents
 
-- `plan/PLAN.md` — product direction, architecture, and roadmap.
+- `plan/PLAN.md` — product direction, architecture, compatibility, and roadmap.
 - `plan/V0.1_SPEC.md` — executable v0.1 semantics and acceptance examples.
 - `plan/VISUAL_DESIGN.md` — Flow Lens visual language and interaction rules.
