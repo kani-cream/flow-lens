@@ -40,6 +40,19 @@ jobs:
       - name: Build and test
         run: ./gradlew build --no-daemon
 
+      # The Actions log is not always reachable through the API, so failures must
+      # leave behind an artifact that identifies the failing test on its own.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/**
+            **/build/idea-sandbox/**/log/**
+          if-no-files-found: ignore
+
       - name: Plugin Verifier
         run: ./gradlew :plugin:verifyPlugin --no-daemon
 
