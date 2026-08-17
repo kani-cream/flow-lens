@@ -10,6 +10,7 @@ import com.kanicream.flowlens.core.model.FlowAnalysisResult
 import com.kanicream.flowlens.core.model.NodeId
 import java.awt.BasicStroke
 import java.awt.Color
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
@@ -51,6 +52,7 @@ class FlowCanvas : JComponent() {
     private var visibleFrames: List<FrameVM> = emptyList()
     private var selectedNodeId: NodeId? = null
     private var zoom = 1.0
+    private var hoveredExpander: NodeId? = null
     private var dragStart: Point? = null
     private var dragOrigin: Point? = null
 
@@ -352,24 +354,38 @@ class FlowCanvas : JComponent() {
     private fun paintCardContent(g2: Graphics2D, card: CardVM) {
         val b = card.bounds
         val baseline = b.y + b.height / 2 + 5
-        g2.font = JBUI.Fonts.label()
-
-        val trailing = buildString {
-            when {
-                card.resolving -> append(FlowLensBundle.message("card.resolving"))
-                card.expandable -> append(if (card.expanded) "▾ " else "▸ ").append(card.callsInside)
-            }
-            card.trailingNote?.let {
-                if (isNotEmpty()) append("  ")
-                append(it)
-            }
-            if (isNotEmpty()) append("   ")
-            append(card.depthLabel)
-        }
         g2.font = JBUI.Fonts.smallFont()
-        val trailingWidth = g2.fontMetrics.stringWidth(trailing)
+
+        // Depth sits at the far right; the expand control keeps a fixed slot next
+        // to it so it is always in the same place and always hittable.
         g2.color = Palette.mutedText
-        g2.drawString(trailing, b.x + b.width - trailingWidth - 10, baseline)
+        g2.drawString(card.depthLabel, b.x + b.width - CanvasMetrics.DEPTH_WIDTH + 4, baseline)
+
+        var rightEdge = b.x + b.width - CanvasMetrics.DEPTH_WIDTH
+        if (card.expandable) {
+            val expander = card.expanderBounds
+            if (card.nodeId == hoveredExpander) {
+                g2.color = Palette.expanderHover
+                g2.fillRoundRect(expander.x + 2, expander.y + 4, expander.width - 4, expander.height - 8, 8, 8)
+            }
+            g2.color = Palette.text
+            val label = (if (card.expanded) "▾ " else "▸ ") + card.callsInside
+            val labelWidth = g2.fontMetrics.stringWidth(label)
+            g2.drawString(label, expander.x + (expander.width - labelWidth) / 2, baseline)
+            rightEdge = expander.x
+        } else if (card.resolving) {
+            val label = FlowLensBundle.message("card.resolving")
+            g2.color = Palette.mutedText
+            g2.drawString(label, rightEdge - g2.fontMetrics.stringWidth(label) - 6, baseline)
+            rightEdge -= g2.fontMetrics.stringWidth(label) + 6
+        }
+        card.trailingNote?.let { note ->
+            g2.color = Palette.mutedText
+            val noteWidth = g2.fontMetrics.stringWidth(note)
+            g2.drawString(note, rightEdge - noteWidth - 6, baseline)
+            rightEdge -= noteWidth + 6
+        }
+        val trailingWidth = b.x + b.width - rightEdge
 
         val prefix = listOfNotNull(card.stateGlyph, card.executionGlyph).joinToString(" ")
         g2.font = JBUI.Fonts.label()
@@ -423,12 +439,10 @@ class FlowCanvas : JComponent() {
                     }
                 }
                 select(card)
-                if (card != null && e.clickCount == 2) {
+                if (card == null) return
+                if (e.clickCount == 2) {
                     onNavigateToTarget(card)
-                } else if (card != null && card.expandable && e.clickCount == 1 &&
-                    e.y / totalScale() > card.bounds.y + 24
-                ) {
-                    // Click on the expander line toggles inline frame expansion.
+                } else if (card.expandable && card.expanderBounds.contains(toLogical(e.point))) {
                     toggleExpansion(card)
                 }
             }
@@ -441,7 +455,20 @@ class FlowCanvas : JComponent() {
             override fun mouseMoved(e: MouseEvent) {
                 // The card shows compact glyphs, so hovering must be able to say
                 // the same thing in words.
-                toolTipText = cardAt(e.point)?.tooltip?.takeIf { it.isNotBlank() }
+                val card = cardAt(e.point)
+                toolTipText = card?.tooltip?.takeIf { it.isNotBlank() }
+                val overExpander = card
+                    ?.takeIf { it.expandable && it.expanderBounds.contains(toLogical(e.point)) }
+                    ?.nodeId
+                if (overExpander != hoveredExpander) {
+                    hoveredExpander = overExpander
+                    cursor = if (overExpander != null) {
+                        Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    } else {
+                        Cursor.getDefaultCursor()
+                    }
+                    repaint()
+                }
             }
 
             override fun mouseDragged(e: MouseEvent) {
@@ -597,6 +624,7 @@ class FlowCanvas : JComponent() {
         val declaredBorder = JBColor(Color(0x9C7BD0), Color(0x8A6FC0))
         val selectionBorder = JBColor(Color(0x3574F0), Color(0x548AF7))
         val connector = JBColor(Color(0x8A8E99), Color(0x6F737A))
+        val expanderHover = JBColor(Color(0xDCE3EE), Color(0x3A4048))
         val boundaryText = JBColor(Color(0x9A7B2D), Color(0xC0A35E))
         val text = JBColor(Color(0x1D1F23), Color(0xDFE1E5))
         val mutedText = JBColor(Color(0x6C707E), Color(0x9DA0A8))

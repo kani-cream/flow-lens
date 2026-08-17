@@ -99,6 +99,34 @@ class CanvasViewModelTest : BasePlatformTestCase() {
         assertTrue(saveCard.childFrame!!.headerBounds.isEmpty)
     }
 
+    fun `test an expandable call exposes a hittable expand control`() {
+        // Regression: expansion used to be triggered by clicking the card's lower
+        // half — an invisible target that vanished when cards became one line.
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), null)
+        val call = b.addEvent(root, spec("save"))!!
+        val body = b.openChildFrame(root, call, symbol("save"), null)
+        b.addEvent(body, spec("audit"))
+        b.markFrameComplete(body)
+        val plain = b.addEvent(root, spec("leaf"))!!
+        val result = b.snapshot(FlowResultStatus.COMPLETED)
+
+        val cards = CanvasViewModelBuilder.build(result, emptySet())!!.cards
+        val expandable = cards.first { it.nodeId == call }
+        val leaf = cards.first { it.nodeId == plain }
+
+        val control = expandable.expanderBounds
+        assertFalse("an expandable call has a control", control.isEmpty)
+        assertTrue("the control sits inside the card", expandable.bounds.contains(control))
+        assertEquals("it spans the full line height", expandable.bounds.height, control.height)
+        assertTrue("it is comfortably clickable", control.width >= 40)
+        assertTrue(
+            "it stays clear of the depth label at the right edge",
+            control.x + control.width <= expandable.bounds.x + expandable.bounds.width,
+        )
+        assertTrue("a call with nothing inside has no control", leaf.expanderBounds.isEmpty)
+    }
+
     fun `test collapsed calls stay plain cards`() {
         val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
         val root = b.openRootFrame(symbol("root"), null)

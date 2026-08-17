@@ -67,6 +67,24 @@ class CardVM(
 
     val expandedInline: Boolean get() = childFrame != null
 
+    /**
+     * The clickable expand/collapse control at the right of the line. Expansion
+     * used to be triggered by clicking the card's lower half, which was an
+     * invisible target and disappeared when cards became one line; a real control
+     * can be seen, hovered, and hit.
+     */
+    val expanderBounds: Rectangle
+        get() = if (!expandable) {
+            Rectangle()
+        } else {
+            Rectangle(
+                bounds.x + bounds.width - CanvasMetrics.EXPANDER_WIDTH - CanvasMetrics.DEPTH_WIDTH,
+                bounds.y,
+                CanvasMetrics.EXPANDER_WIDTH,
+                bounds.height,
+            )
+        }
+
     /** Bottom of everything this card owns, including its limit marker. */
     val occupiedBottom: Int
         get() = containerBounds.y + containerBounds.height +
@@ -111,6 +129,10 @@ object CanvasMetrics {
      */
     const val CARD_HEIGHT = 30
     const val CONNECTOR_GAP = 20
+
+    /** Width of the expand/collapse control and of the depth label beside it. */
+    const val EXPANDER_WIDTH = 46
+    const val DEPTH_WIDTH = 34
     const val BOUNDARY_GAP = 40
     const val FRAME_PADDING = 14
     const val FRAME_HEADER = 34
