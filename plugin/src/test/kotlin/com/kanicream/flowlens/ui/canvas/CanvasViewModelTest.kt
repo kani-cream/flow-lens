@@ -58,6 +58,60 @@ class CanvasViewModelTest : BasePlatformTestCase() {
         assertEquals(1, card.callsInside)
     }
 
+    fun `test an expanded call becomes one container holding its body`() {
+        // Regression: the body used to be a second box below the call, so the
+        // sequence connector appeared to come out of the last nested call and the
+        // callable's name was drawn twice.
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), null)
+        val call = b.addEvent(root, spec("save"))!!
+        val body = b.openChildFrame(root, call, symbol("save"), null)
+        b.addEvent(body, spec("audit"))
+        b.markFrameComplete(body)
+        val next = b.addEvent(root, spec("validate"))!!
+        val result = b.snapshot(FlowResultStatus.COMPLETED)
+
+        val vm = CanvasViewModelBuilder.build(result, expandedNodes = setOf(call))!!
+        val saveCard = vm.cards.first { it.nodeId == call }
+        val validateCard = vm.cards.first { it.nodeId == next }
+        val auditCard = saveCard.childFrame!!.cards.single()
+
+        // The container encloses the header and the whole body.
+        assertTrue(saveCard.containerBounds.contains(saveCard.bounds))
+        assertTrue(saveCard.containerBounds.contains(auditCard.bounds))
+        assertTrue(saveCard.containerBounds.height > saveCard.bounds.height)
+
+        // The next sibling starts below the container, so the connector that
+        // reaches it leaves the container edge rather than the nested call.
+        assertEquals(saveCard.containerBounds.y + saveCard.containerBounds.height, saveCard.occupiedBottom)
+        assertTrue(validateCard.bounds.y > saveCard.occupiedBottom)
+        assertTrue(auditCard.bounds.y + auditCard.bounds.height < validateCard.bounds.y)
+
+        // The body is inset on both sides instead of being its own box.
+        assertTrue(auditCard.bounds.x > saveCard.bounds.x)
+        assertTrue(
+            auditCard.bounds.x + auditCard.bounds.width <
+                saveCard.containerBounds.x + saveCard.containerBounds.width,
+        )
+        // Only the root frame names itself; the body is named by its call card.
+        assertTrue(vm.rendersHeader)
+        assertFalse(saveCard.childFrame!!.rendersHeader)
+        assertTrue(saveCard.childFrame!!.headerBounds.isEmpty)
+    }
+
+    fun `test collapsed calls stay plain cards`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), null)
+        val call = b.addEvent(root, spec("save"))!!
+        val body = b.openChildFrame(root, call, symbol("save"), null)
+        b.addEvent(body, spec("audit"))
+        b.markFrameComplete(body)
+        val card = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!.cards.single()
+        assertFalse(card.expandedInline)
+        assertEquals(card.bounds, card.containerBounds)
+    }
+
     fun `test expanding a card lays out its nested frame below the card`() {
         val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
         val root = b.openRootFrame(symbol("root"), null)
@@ -300,11 +354,13 @@ class CanvasViewModelTest : BasePlatformTestCase() {
         assertEquals(2, frames.size)
         assertEquals(entry, frames[0].entryLocation)
         assertEquals(childEntry, frames[1].entryLocation)
-        for (frame in frames) {
-            assertEquals(frame.bounds.x, frame.headerBounds.x)
-            assertEquals(frame.bounds.y, frame.headerBounds.y)
-            assertEquals(CanvasMetrics.FRAME_HEADER, frame.headerBounds.height)
-        }
+        // The root frame carries a clickable header; an expanded body does not,
+        // because its call card already names and opens that callable.
+        val rootFrame = frames.single { it.rendersHeader }
+        assertEquals(rootFrame.bounds.x, rootFrame.headerBounds.x)
+        assertEquals(rootFrame.bounds.y, rootFrame.headerBounds.y)
+        assertEquals(CanvasMetrics.FRAME_HEADER, rootFrame.headerBounds.height)
+        assertTrue(frames.single { !it.rendersHeader }.headerBounds.isEmpty)
         // Collapsed view hides the child frame from hit testing.
         assertEquals(
             1,

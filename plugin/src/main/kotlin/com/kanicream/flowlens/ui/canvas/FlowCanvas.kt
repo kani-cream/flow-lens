@@ -225,39 +225,45 @@ class FlowCanvas : JComponent() {
         }
     }
 
+    /** Only the root frame draws a container of its own; calls own their bodies. */
     private fun paintFrame(g2: Graphics2D, frame: FrameVM) {
         val b = frame.bounds
-        // Frame container.
-        g2.color = if (frame.isRoot) Palette.rootFrameBg else Palette.frameBg
+        g2.color = Palette.rootFrameBg
         g2.fillRoundRect(b.x, b.y, b.width, b.height, 16, 16)
-        g2.color = if (frame.isRoot) Palette.rootFrameBorder else Palette.frameBorder
-        g2.stroke = BasicStroke(if (frame.isRoot) 2f else 1f)
+        g2.color = Palette.rootFrameBorder
+        g2.stroke = BasicStroke(2f)
         g2.drawRoundRect(b.x, b.y, b.width, b.height, 16, 16)
-        // Header.
+
         g2.font = JBUI.Fonts.label().asBold()
         g2.color = Palette.text
         val headerY = b.y + 21
-        val prefix = if (frame.isRoot) "▶ " else ""
-        g2.drawString(prefix + frame.title, b.x + CanvasMetrics.FRAME_PADDING, headerY)
+        g2.drawString("▶ " + frame.title, b.x + CanvasMetrics.FRAME_PADDING, headerY)
         g2.font = JBUI.Fonts.smallFont()
         g2.color = Palette.mutedText
-        val entryTag = if (frame.isRoot) FlowLensBundle.message("card.entry.badge") + " · " else ""
-        g2.drawString(entryTag + frame.subtitle, b.x + CanvasMetrics.FRAME_PADDING, headerY + 13)
+        g2.drawString(
+            FlowLensBundle.message("card.entry.badge") + " · " + frame.subtitle,
+            b.x + CanvasMetrics.FRAME_PADDING,
+            headerY + 13,
+        )
 
+        paintCards(g2, frame)
+    }
+
+    /** Paints one frame's cards in order, with the sequence connectors between them. */
+    private fun paintCards(g2: Graphics2D, frame: FrameVM) {
         var previous: CardVM? = null
         for (card in frame.cards) {
             previous?.let { paintConnector(g2, it, card) }
-            paintCard(g2, card)
+            paintCardTree(g2, card)
             if (card.depthLimited) paintDepthLimitStub(g2, card)
-            card.childFrame?.let { paintFrame(g2, it) }
             previous = card
         }
     }
 
     /** Explicit continuation marker: more code exists but was not analyzed. */
     private fun paintDepthLimitStub(g2: Graphics2D, card: CardVM) {
-        val x = card.bounds.x + 14
-        val y = card.bounds.y + card.bounds.height
+        val x = card.containerBounds.x + 14
+        val y = card.containerBounds.y + card.containerBounds.height
         g2.color = Palette.connector
         g2.stroke = DASHED_STROKE
         g2.drawLine(x, y + 2, x, y + CanvasMetrics.LIMIT_STUB_HEIGHT - 6)
@@ -270,14 +276,18 @@ class FlowCanvas : JComponent() {
         )
     }
 
+    /**
+     * The sequence connector between two siblings. It starts below everything the
+     * previous call owns — including an expanded body — so the line always
+     * expresses "the next step in this frame", never a call made by nested code.
+     */
     private fun paintConnector(g2: Graphics2D, from: CardVM, to: CardVM) {
         val fromBottom = from.occupiedBottom
-        val x = from.bounds.x + from.bounds.width / 2
+        val x = from.containerBounds.x + from.containerBounds.width / 2
         val yEnd = to.bounds.y
         g2.color = Palette.connector
         g2.stroke = if (to.dashedIncomingConnector) DASHED_STROKE else SOLID_STROKE
         g2.drawLine(x, fromBottom + 2, x, yEnd - 2)
-        // Arrow head.
         g2.fillPolygon(
             intArrayOf(x - 4, x + 4, x),
             intArrayOf(yEnd - 6, yEnd - 6, yEnd - 1),
@@ -295,19 +305,45 @@ class FlowCanvas : JComponent() {
         }
     }
 
-    private fun paintCard(g2: Graphics2D, card: CardVM) {
-        val b = card.bounds
+    /**
+     * An expanded call is drawn as one container: the card is its header and the
+     * analyzed body sits inside it. The sequence connector therefore leaves the
+     * container's edge instead of appearing to come out of the last nested call.
+     */
+    private fun paintCardTree(g2: Graphics2D, card: CardVM) {
+        paintCardBox(g2, card)
+        paintCardContent(g2, card)
+        val body = card.childFrame ?: return
+        // Separator between the call's own header and the body it contains.
+        val header = card.bounds
+        g2.color = Palette.cardBorder
+        g2.stroke = DASHED_STROKE
+        g2.drawLine(
+            header.x + 12,
+            header.y + header.height + CanvasMetrics.NESTED_TOP_GAP / 2,
+            header.x + header.width - 12,
+            header.y + header.height + CanvasMetrics.NESTED_TOP_GAP / 2,
+        )
+        paintCards(g2, body)
+    }
+
+    /** Draws the box for a call: just the card, or the whole container when expanded. */
+    private fun paintCardBox(g2: Graphics2D, card: CardVM) {
+        val box = card.containerBounds
         val selected = card.nodeId == selectedNodeId
         g2.color = cardBackground(card.style)
-        g2.fillRoundRect(b.x, b.y, b.width, b.height, 12, 12)
+        g2.fillRoundRect(box.x, box.y, box.width, box.height, 12, 12)
         g2.color = if (selected) Palette.selectionBorder else cardBorder(card.style)
         g2.stroke = when {
             selected -> BasicStroke(2f)
             card.style == CardStyle.UNRESOLVED || card.style == CardStyle.AMBIGUOUS -> DASHED_STROKE
             else -> SOLID_STROKE
         }
-        g2.drawRoundRect(b.x, b.y, b.width, b.height, 12, 12)
+        g2.drawRoundRect(box.x, box.y, box.width, box.height, 12, 12)
+    }
 
+    private fun paintCardContent(g2: Graphics2D, card: CardVM) {
+        val b = card.bounds
         val textX = b.x + 12
         g2.font = JBUI.Fonts.label()
         g2.color = if (card.style == CardStyle.LIMIT || card.style == CardStyle.CYCLE) {
@@ -515,8 +551,9 @@ class FlowCanvas : JComponent() {
 
     private fun frameHeaderAt(point: Point): FrameVM? {
         val logical = toLogical(point)
-        // Deepest (nested) frame wins, so hit-test in reverse layout order.
-        return visibleFrames.lastOrNull { it.headerBounds.contains(logical) }
+        // Only the root frame draws a header; an expanded call is opened through
+        // its own card, which is that container's header.
+        return visibleFrames.lastOrNull { it.rendersHeader && it.headerBounds.contains(logical) }
     }
 
     private fun toLogical(point: Point): Point {

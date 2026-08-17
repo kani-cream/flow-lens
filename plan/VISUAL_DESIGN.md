@@ -196,6 +196,35 @@ Requirements:
 - deep content remains progressively collapsible.
 - `Analyze from Here` can promote a selected callable to the new root.
 
+### One box per call
+
+An expanded call is **one container**: the call card is its header and the
+analyzed body is drawn inside it. The body is never a second box placed below
+the call.
+
+This is a correctness requirement, not decoration. The canvas expresses two
+different relationships — the sequence of events inside a frame, and the
+containment of a callee's body — and both are vertical. Drawing the body as a
+sibling box makes the sequence connector to the next call appear to start at the
+last nested call, implying a call that does not exist:
+
+```text
+save()                    save()  ──┐
+  │                       ╰ audit()  │   ← wrong: reads as audit() → validate()
+audit()        instead of            │
+  │                       validate() ┘
+validate()
+```
+
+Rules:
+
+- the container's header names the call exactly once;
+- the body is inset on both sides so nesting is visible without a second frame
+  header;
+- sequence connectors attach to the container's outer edge, so a connector always
+  means "the next event in this frame";
+- a collapsed call stays a plain card.
+
 ---
 
 ## 8. Connectors and Ordering

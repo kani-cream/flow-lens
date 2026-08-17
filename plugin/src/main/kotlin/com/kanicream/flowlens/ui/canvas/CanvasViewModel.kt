@@ -45,15 +45,24 @@ class CardVM(
     val childFrame: FrameVM?,
 ) {
     val nodeId: NodeId get() = node.id
+
+    /** The card's own header region: what selection and hit testing use. */
     var bounds: Rectangle = Rectangle()
 
-    /** Bottom of everything this card owns: its own box, stub, and expanded frame. */
+    /**
+     * The box drawn for this call. When the call is expanded this is the whole
+     * container — the header plus the analyzed body inside it — so a sibling
+     * connector attaches to the container's edge rather than appearing to come
+     * out of the last nested call (`VISUAL_DESIGN.md` §7).
+     */
+    var containerBounds: Rectangle = Rectangle()
+
+    val expandedInline: Boolean get() = childFrame != null
+
+    /** Bottom of everything this card owns, including its limit marker. */
     val occupiedBottom: Int
-        get() {
-            val frameBottom = childFrame?.bounds?.let { it.y + it.height } ?: 0
-            val stub = if (depthLimited) CanvasMetrics.LIMIT_STUB_HEIGHT else 0
-            return maxOf(bounds.y + bounds.height + stub, frameBottom)
-        }
+        get() = containerBounds.y + containerBounds.height +
+            if (depthLimited) CanvasMetrics.LIMIT_STUB_HEIGHT else 0
 }
 
 /** One rendered frame container (analyzed callable body). */
@@ -67,9 +76,19 @@ class FrameVM(
 ) {
     var bounds: Rectangle = Rectangle()
 
+    /**
+     * Only the root frame draws a header of its own; an expanded child frame is
+     * rendered inside its call card, which already names the callable.
+     */
+    val rendersHeader: Boolean get() = isRoot
+
     /** The clickable header strip; double-click opens the entry declaration. */
     val headerBounds: Rectangle
-        get() = Rectangle(bounds.x, bounds.y, bounds.width, CanvasMetrics.FRAME_HEADER)
+        get() = if (rendersHeader) {
+            Rectangle(bounds.x, bounds.y, bounds.width, CanvasMetrics.FRAME_HEADER)
+        } else {
+            Rectangle()
+        }
 }
 
 /** Logical (unscaled) layout constants; the canvas applies zoom and UI scale. */
@@ -84,6 +103,10 @@ object CanvasMetrics {
     const val CHILD_INDENT = 18
     const val CANVAS_MARGIN = 24
     const val LIMIT_STUB_HEIGHT = 20
+
+    /** Space between an expanded call's header and the body drawn inside it. */
+    const val NESTED_TOP_GAP = 10
+    const val NESTED_BOTTOM_PAD = 12
 }
 
 /**
@@ -97,7 +120,13 @@ object CanvasViewModelBuilder {
     fun build(result: FlowAnalysisResult, expandedNodes: Set<NodeId>): FrameVM? {
         val root = result.rootFrame ?: return null
         val rootVM = frameVM(result, root, expandedNodes, isRoot = true)
-        layoutFrame(rootVM, CanvasMetrics.CANVAS_MARGIN, CanvasMetrics.CANVAS_MARGIN)
+        layoutFrame(
+            frame = rootVM,
+            x = CanvasMetrics.CANVAS_MARGIN,
+            y = CanvasMetrics.CANVAS_MARGIN,
+            padding = CanvasMetrics.FRAME_PADDING,
+            withHeader = true,
+        )
         return rootVM
     }
 
@@ -235,32 +264,68 @@ object CanvasViewModelBuilder {
 
     // ---- layout ----
 
-    /** Assigns bounds; returns the frame's occupied rectangle. */
-    private fun layoutFrame(frame: FrameVM, x: Int, y: Int): Rectangle {
-        val pad = CanvasMetrics.FRAME_PADDING
-        var cursorY = y + CanvasMetrics.FRAME_HEADER + pad
-        var maxWidth = CanvasMetrics.CARD_WIDTH
-        val cardX = x + pad
+    /**
+     * Widths are decided before positioning so every card in one frame is the
+     * same width and an expanded call is wide enough to hold its body.
+     */
+    private fun measureFrameWidth(frame: FrameVM): Int =
+        frame.cards.maxOfOrNull(::measureCardWidth) ?: CanvasMetrics.CARD_WIDTH
+
+    private fun measureCardWidth(card: CardVM): Int =
+        card.childFrame
+            ?.let { measureFrameWidth(it) + 2 * CanvasMetrics.CHILD_INDENT }
+            ?: CanvasMetrics.CARD_WIDTH
+
+    /**
+     * Assigns bounds top to bottom and returns the frame's occupied rectangle.
+     * An expanded call lays its body out inside the call's own container, so the
+     * parent's sequence stays one column of boxes.
+     */
+    private fun layoutFrame(
+        frame: FrameVM,
+        x: Int,
+        y: Int,
+        padding: Int,
+        withHeader: Boolean,
+    ): Rectangle {
+        val contentWidth = measureFrameWidth(frame)
+        val cardX = x + padding
+        var cursorY = y + padding + if (withHeader) CanvasMetrics.FRAME_HEADER else 0
         frame.cards.forEachIndexed { index, card ->
             if (index > 0) {
-                cursorY += if (card.boundaryBeforeCard) CanvasMetrics.BOUNDARY_GAP else CanvasMetrics.CONNECTOR_GAP
+                cursorY += if (card.boundaryBeforeCard) {
+                    CanvasMetrics.BOUNDARY_GAP
+                } else {
+                    CanvasMetrics.CONNECTOR_GAP
+                }
             }
-            val cardHeight = CanvasMetrics.CARD_HEIGHT +
+            val headerHeight = CanvasMetrics.CARD_HEIGHT +
                 if (card.badges.isEmpty()) 0 else CanvasMetrics.CARD_BADGE_EXTRA
-            card.bounds = Rectangle(cardX, cursorY, CanvasMetrics.CARD_WIDTH, cardHeight)
-            cursorY += cardHeight
+            card.bounds = Rectangle(cardX, cursorY, contentWidth, headerHeight)
+            cursorY += headerHeight
+
+            val body = card.childFrame
+            if (body == null) {
+                card.containerBounds = card.bounds
+            } else {
+                // The body is inset by CHILD_INDENT on both sides, which is why
+                // the container was measured that much wider than its content.
+                val bodyRect = layoutFrame(
+                    frame = body,
+                    x = cardX + CanvasMetrics.CHILD_INDENT,
+                    y = cursorY + CanvasMetrics.NESTED_TOP_GAP,
+                    padding = 0,
+                    withHeader = false,
+                )
+                cursorY = bodyRect.y + bodyRect.height + CanvasMetrics.NESTED_BOTTOM_PAD
+                card.containerBounds =
+                    Rectangle(cardX, card.bounds.y, contentWidth, cursorY - card.bounds.y)
+            }
             // A call that could not be entered because of the depth limit keeps an
             // explicit continuation marker: a connector never just stops.
             if (card.depthLimited) cursorY += CanvasMetrics.LIMIT_STUB_HEIGHT
-            card.childFrame?.let { child ->
-                cursorY += CanvasMetrics.CONNECTOR_GAP / 2
-                val childRect = layoutFrame(child, cardX + CanvasMetrics.CHILD_INDENT, cursorY)
-                cursorY = childRect.y + childRect.height
-                maxWidth = maxOf(maxWidth, childRect.x + childRect.width + CanvasMetrics.CHILD_INDENT - x)
-            }
         }
-        val height = (cursorY - y) + pad
-        frame.bounds = Rectangle(x, y, maxWidth + pad * 2, height)
+        frame.bounds = Rectangle(x, y, contentWidth + padding * 2, cursorY - y + padding)
         return frame.bounds
     }
 }
