@@ -1,155 +1,177 @@
 # Flow Lens Development Plan
 
-## 1. Overview
+## 1. Product Statement
 
-Flow Lens is an IntelliJ Platform plugin that statically analyzes the execution flow starting from a developer-selected method and visualizes how processing proceeds through the codebase.
+**Flow Lens is an IntelliJ Platform plugin that turns a selected function or method into an explorable static execution-flow map.**
 
-The core idea is simple:
+The user chooses one entry point. Flow Lens follows the reachable code within bounded limits, preserves meaningful execution order, exposes uncertainty instead of hiding it, and presents the result as a visual map that can be explored and navigated back to source.
 
 > Select a method. See where the code flows.
 
-Unlike a repository-wide analyzer, Flow Lens focuses on a deliberately narrow starting point: one method selected by the user. This keeps analysis practical on large codebases while producing a visualization that is directly useful for code reading, debugging, code review, onboarding, and impact investigation.
-
-Flow Lens is not intended to perfectly reconstruct runtime behavior. Instead, it should provide a fast, explainable, IDE-native static approximation of the flow, while clearly exposing ambiguity where static analysis cannot determine a single target.
+The product is intentionally not a repository-wide analyzer and not a runtime tracer. It is a focused source-understanding tool for reading unfamiliar code, debugging, code review, onboarding, and investigation.
 
 ---
 
-## 2. Product Goals
+## 2. Official Target Languages
 
-### Primary goals
+Flow Lens targets these languages as first-class product languages:
 
-- Analyze an arbitrary method selected in the IntelliJ editor.
-- Resolve method calls reachable from that method.
-- Preserve source-level execution order rather than showing only a flat call hierarchy.
-- Visualize calls, branches, returns, exceptions, loops, and unresolved/ambiguous targets.
-- Allow users to jump from visualization nodes back to source code.
-- Keep analysis bounded so it remains responsive on real-world repositories.
-- Allow frequently used methods and analyzed flows to be saved for quick access.
-- Work fully locally without requiring an external server or AI API.
+- **Java**
+- **Kotlin**
+- **Go**
 
-### Secondary goals
+The visualization and persistence layers must remain language-neutral. Language-specific behavior belongs behind analyzer adapters.
 
-- Provide multiple views over the same analysis model, such as Tree, Flow, and Sequence views.
-- Export analysis results in reusable formats such as Markdown and Mermaid.
-- Make the analysis process visible enough that users can understand what the plugin is doing.
-- Reuse IntelliJ Platform code intelligence instead of implementing a standalone parser or indexer where possible.
+Conceptual architecture:
+
+```text
+                    FlowAnalysisEngine
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+   Java Analyzer     Kotlin Analyzer     Go Analyzer
+          │                │                │
+          └────────────────┼────────────────┘
+                           ↓
+                  FlowAnalysisResult
+                           ↓
+                     Flow Canvas
+```
+
+Java and Kotlin may share JVM/UAST utilities where that improves consistency, but language-specific PSI or analysis APIs may be used where they produce more accurate results. Go support should be isolated behind its own analyzer so the core model and UI do not depend on Go-specific PSI types.
+
+A language must not be advertised as supported unless entry-point detection, call extraction, resolution, source navigation, cycle handling, and core Flow Canvas rendering work reliably for that language.
 
 ---
 
-## 3. Non-Goals
+## 3. Product Goals
 
-The initial versions should explicitly avoid the following:
+### Core goals
+
+- Analyze exactly one user-selected method/function as the entry point.
+- Follow project-local calls recursively within explicit limits.
+- Preserve **evaluation/execution order**, not merely lexical or declaration order.
+- Represent the same target being called multiple times as separate call-site events.
+- Show external, unresolved, ambiguous, cyclic, and truncated paths explicitly.
+- Navigate from any source-backed visual element to code.
+- Keep analysis cancellable and responsive on real-world projects.
+- Work locally without requiring an AI service or external server.
+- Make the analysis visibly progress as the Flow Canvas grows.
+
+### Product differentiation
+
+Flow Lens must not become a prettier Call Hierarchy.
+
+The primary experience is a **semantic Flow Map**: calls, boundaries, branches, loops, async work, ambiguity, and depth are represented differently so that the user can understand the character of the flow at a glance.
+
+Visual quality is a core product requirement, not a later polish task.
+
+---
+
+## 4. Non-Goals
+
+The initial product does not attempt to provide:
 
 - Whole-repository exhaustive control-flow analysis.
 - Guaranteed runtime-accurate execution traces.
-- Full interprocedural symbolic execution.
-- Runtime instrumentation or profiler-style tracing.
-- Complete handling of reflection, dynamic proxies, event buses, framework magic, or runtime configuration.
-- Automatically choosing a single implementation when static analysis finds multiple valid targets.
-- Replacing IntelliJ's existing Call Hierarchy or Bookmarks features.
+- Full symbolic execution.
+- Runtime instrumentation or profiling.
+- Perfect resolution of reflection, framework magic, dynamic proxies, runtime DI configuration, or generated behavior.
+- Automatic selection of one implementation when multiple targets are plausible.
+- A replacement for IntelliJ Bookmarks or Call Hierarchy.
 
-Flow Lens should prefer an honest `ambiguous`, `external`, or `unresolved` result over pretending certainty.
+Flow Lens must prefer an explicit `AMBIGUOUS`, `UNRESOLVED`, `EXTERNAL`, or `LIMIT_REACHED` result over false certainty.
 
 ---
 
-## 4. Core User Experience
+## 5. Entry Point and Analysis Semantics
 
-### 4.1 Start analysis
+Every analysis starts from exactly one function-like declaration.
 
-The user places the caret inside a method and invokes:
+For the initial implementation, supported entry points are:
 
-- Editor context menu: `Flow Lens > Analyze Execution Flow`
-- Optional shortcut.
-- Tool Window action: `Analyze Current Method`
+- Java methods and constructors.
+- Kotlin named functions and constructors where resolvable.
+- Go functions and methods.
 
-Example source:
+The caret may be anywhere inside the supported declaration or its signature. The containing supported declaration becomes the entry point.
+
+Unsupported constructs should fail clearly rather than guessing.
+
+### Evaluation order
+
+"Source order" means the language's meaningful expression evaluation order where Flow Lens can determine it.
+
+Example:
 
 ```java
-public void purchase(Order order) {
-    validate(order);
-
-    User user = userRepository.find(order.userId());
-
-    if (user.hasBalance()) {
-        paymentService.charge(user, order);
-    }
-
-    orderRepository.save(order);
-    notificationService.send(user);
-}
+save(convert(load(id)));
 ```
 
-The initial visualization should preserve the logical source order:
+Expected conceptual order:
 
 ```text
-purchase()
-   │
-   ├─ validate()
-   │
-   ├─ userRepository.find()
-   │
-   ├─ [if user.hasBalance()]
-   │       │
-   │       └─ paymentService.charge()
-   │               │
-   │               ├─ paymentGateway.request()
-   │               └─ transactionRepository.save()
-   │
-   ├─ orderRepository.save()
-   │
-   └─ notificationService.send()
+load(id)
+  ↓
+convert(...)
+  ↓
+save(...)
 ```
 
-This is intentionally different from a conventional Call Hierarchy. The plugin should model the method body as an execution structure, not merely a set of outgoing edges.
+For Java:
+
+```java
+foo(a(), b());
+```
+
+must be represented as:
+
+```text
+a()
+ ↓
+b()
+ ↓
+foo()
+```
+
+A simple PSI preorder that produces `foo → a → b` is incorrect for Flow Lens.
+
+### Call site versus symbol
+
+A visual flow node represents an **event at a call site**, not a globally unique method symbol.
+
+```text
+FlowNode
+  ├─ callSite
+  ├─ targetSymbol
+  ├─ sourceLocation
+  └─ nodeType
+```
+
+If one symbol is called three times, the map contains three call nodes even though they may reference the same target symbol.
 
 ---
 
-## 5. Analysis Model
+## 6. Shared Analysis Model
 
-### 5.1 Entry point
+The renderer consumes a language-neutral model.
 
-Every analysis starts from exactly one method or function.
-
-The selected entry point should be represented by a stable source identifier containing at least:
-
-- Project-relative file path.
-- Symbol name.
-- Containing class/object where applicable.
-- Method/function signature where available.
-- Source offset or PSI smart pointer for navigation.
-
-### 5.2 Analysis strategy
-
-High-level algorithm:
+Core concepts:
 
 ```text
-Selected method
-    ↓
-Obtain PSI/UAST representation
-    ↓
-Walk statements in source order
-    ↓
-Detect executable constructs
-    ↓
-Resolve method/function calls
-    ↓
-Create flow nodes and edges
-    ↓
-Recursively analyze project-local targets
-    ↓
-Stop when configured limits are reached
+FlowAnalysisResult
+FlowGraph
+FlowNode
+FlowEdge
+FlowSymbol
+FlowSourceLocation
 ```
 
-The implementation should use IntelliJ Platform PSI and, where appropriate, UAST rather than parsing source text manually.
-
-### 5.3 Node types
-
-The analysis model should be designed for more than method calls from the beginning.
-
-Suggested node types:
+Planned node types:
 
 - `ENTRY`
 - `METHOD_CALL`
+- `CONSTRUCTOR_CALL`
 - `CONDITION`
 - `SWITCH`
 - `LOOP`
@@ -164,723 +186,389 @@ Suggested node types:
 - `UNRESOLVED_CALL`
 - `CYCLE`
 - `LIMIT_REACHED`
+- `CANCELLED`
 
-Not all node types need to be supported in v0.1, but the internal model should not assume that every node is a method.
-
-### 5.4 Edge types
-
-Suggested edge semantics:
+Planned edge semantics:
 
 - Normal execution.
 - Call.
 - Return.
 - True branch.
 - False branch.
-- Switch case.
+- Switch/case branch.
+- Loop body/back edge.
 - Exception path.
-- Loop body.
+- Async fork.
 - Ambiguous candidate.
 
-This allows the rendering layer to evolve without changing the fundamental analysis result.
+The internal model must be rich enough for future Flow, Graph, Sequence, and export views without re-running analysis for each renderer.
 
 ---
 
-## 6. Method Resolution
+## 7. Resolution Rules
 
-### 6.1 Project-local methods
+### Project-local
 
-If a call can be resolved to a method/function inside the current project, Flow Lens may recursively analyze it according to the configured depth and limits.
+Calls resolved to project content may be recursively analyzed up to configured limits.
 
-### 6.2 External libraries
+### External
 
-External library calls should stop by default and be represented as terminal nodes.
+Dependency and SDK/library calls stop by default and render as terminal calls beyond a visible project boundary.
 
-Example:
+### Ambiguous
 
-```text
-paymentGateway.request()
-    ↓
-[External] okhttp3.Call.execute()
-```
+If static analysis cannot determine one target with sufficient confidence, Flow Lens must not silently pick an implementation.
 
-Users may later be given an explicit action such as `Expand External Call`, but external traversal should not be enabled by default.
+In v0.1 the call is marked `AMBIGUOUS` and recursive traversal stops there. Later versions may display and selectively expand candidates.
 
-### 6.3 Interfaces and multiple targets
+### Unresolved
 
-When a call resolves to an interface, abstract method, virtual dispatch point, or otherwise has multiple plausible implementations, Flow Lens must not silently choose one.
+If the IDE cannot resolve the target, create an `UNRESOLVED_CALL` tied to the call site and continue analysis of other paths.
 
-Example:
+### Cycles
 
-```text
-paymentService.pay()
-    │
-    ├─ CreditCardPaymentService.pay()
-    ├─ PayPayPaymentService.pay()
-    └─ BankPaymentService.pay()
-```
-
-The visualization should make the ambiguity visible and allow the user to expand one or more candidates manually.
-
-Possible future enhancement:
-
-- Rank likely targets using IDE/framework knowledge.
-- Mark known Spring bean implementations.
-- Allow users to select a preferred target for the current Saved Flow.
-
-These should remain hints, not claims of runtime certainty.
-
-### 6.4 Unresolved calls
-
-If IntelliJ cannot resolve the target, create an explicit unresolved node.
-
-```text
-someDynamicCall()
-    ↓
-[Unresolved]
-```
-
-The user should still be able to navigate to the call site.
-
----
-
-## 7. Control-Flow Visualization
-
-### 7.1 Conditions
-
-Conditions are a major differentiator from ordinary call graphs.
-
-Example:
-
-```java
-if (user == null) {
-    throw new UserNotFoundException();
-}
-
-if (!user.isActive()) {
-    disable(user);
-    return;
-}
-
-process(user);
-```
-
-Desired conceptual visualization:
-
-```text
-◇ user == null ?
-   ├─ YES → throw UserNotFoundException
-   └─ NO
-       ↓
-◇ !user.isActive() ?
-   ├─ YES → disable()
-   │          ↓
-   │        return
-   └─ NO → process()
-```
-
-### 7.2 Switch / when
-
-Switch-like constructs should create one branch per case where feasible.
-
-### 7.3 Loops
-
-Loops should be represented as structured nodes rather than expanded indefinitely.
-
-Example:
-
-```text
-[for each item]
-    ↓
-process(item)
-    ↺
-```
-
-Recursive expansion inside the loop is allowed, but the loop itself must provide a natural cycle boundary.
-
-### 7.4 Exceptions
-
-`throw`, `try`, `catch`, and `finally` should become explicit once control-flow support is introduced.
-
-Exact exception propagation between methods is not required for the first implementation.
+Cycle detection is traversal-path based, not global. The same symbol may legitimately appear in separate branches or separate call sites.
 
 ---
 
 ## 8. Analysis Limits
 
-Flow Lens must be defensive by default.
-
-Suggested defaults:
+The default settings are fixed as:
 
 ```text
-Max depth                3
-Max nodes              100
+Max method depth          3
+Max total nodes         100
 Project sources only     ON
 Include tests           OFF
 Include libraries       OFF
 ```
 
-Configurable limits should include:
+**Depth counts method/function boundaries only.** Structural visual nodes such as conditions do not consume recursive depth.
 
-- Maximum recursive depth.
-- Maximum total nodes.
-- Maximum candidate implementations per ambiguous call.
-- Whether tests are included.
-- Whether external libraries may be expanded.
-- Package/module include and exclude rules.
+When a limit is reached, Flow Lens inserts a visible `LIMIT_REACHED` terminal marker. It must never silently truncate a map.
 
-When a limit is reached, the graph must contain a visible terminal marker instead of silently truncating the result.
+Only one active analysis is allowed per project in v0.1. Starting a new analysis cancels the previous one.
 
-Example:
-
-```text
-OrderService.execute()
-    ↓
-[Depth limit reached]
-```
+If the user cancels analysis, already-produced nodes remain visible and the result is marked partial/cancelled.
 
 ---
 
-## 9. Cycle Detection
+## 9. Flow Canvas — Primary Visualization
 
-Recursive calls and cyclic dependency paths must not cause infinite analysis.
+The primary v0.1 visualization is **Flow Canvas**, hosted in the Flow Lens Tool Window.
 
-Example:
+A plain Swing tree or a linear `A → B → C` visualization is not considered the target user experience.
+
+The canvas begins with a vertical top-to-bottom reading direction but uses semantic visual structures rather than identical boxes and arrows.
+
+Core visual language:
+
+- Entry point: prominent entry card.
+- Method/function call: compact callable card.
+- Nested expansion: a method can visually open to reveal its internal flow.
+- Condition: split/fan-out structure.
+- Loop: bounded container with a visible iteration/back-edge concept.
+- Async: separate lane/fork instead of a normal synchronous connector.
+- External code: rendered beyond a project boundary.
+- Ambiguous target: fan-out/possibility treatment, not an error treatment.
+- Unresolved target: broken/unknown endpoint.
+- Depth/node limit: explicit continuation/truncation marker.
+- Cycle: back-reference instead of recursively duplicating forever.
+
+The visual grammar is defined separately in `plan/VISUAL_DESIGN.md`.
+
+### Progressive analysis
+
+The canvas should grow as analysis completes:
 
 ```text
-A.foo()
+Entry
   ↓
-B.bar()
+resolved call
   ↓
-A.foo()
-  ↓
-[Cycle → A.foo()]
+resolving…
 ```
 
-Cycle detection should operate on symbol identity within the current traversal path rather than globally suppressing all repeated methods. The same method may legitimately appear in multiple different branches.
+Counters update during analysis, for example:
+
+```text
+26 nodes · 12 project calls · 3 external · 1 ambiguous
+```
+
+This is functional feedback, not decorative animation.
 
 ---
 
-## 10. Tool Window
+## 10. Tool Window and Interaction
 
-Flow Lens should have a dedicated Tool Window.
+v0.1 uses a dedicated **Tool Window**, not an editor tab.
 
-Initial structure:
+Primary interactions:
 
-```text
-FLOW LENS
-
-Analyze
-────────────────────────
-▶ Analyze Current Method
-
-Current Flow
-────────────────────────
-PaymentService.execute()
-Depth: 3 | Nodes: 26
-
-Pinned
-────────────────────────
-★ Payment Entry
-★ Transaction Lock
-★ User Lookup
-
-Saved Flows
-────────────────────────
-★ Purchase Flow
-★ Login Flow
-★ Refund Flow
-
-Recent
-────────────────────────
-○ UserService.update()
-○ OrderService.create()
-```
-
-The graph/flow visualization should occupy the main part of the Tool Window or optionally open in an editor tab if the IntelliJ Platform integration makes that experience better.
-
----
-
-## 11. Navigation
-
-Every source-backed node should support:
-
-- Single click: select node and show details.
+- `Flow Lens > Analyze Execution Flow` from the editor context menu.
+- `Analyze Current Method` in the Tool Window.
+- Single click: select a visual element and show details.
 - Double click / Enter: navigate to source.
 - Context action: `Open Source`.
 - Context action: `Analyze from Here`.
-- Context action: `Pin Method`.
+- Context action: `Pin Method` when Flow Pins are available.
+- Expand/collapse nested method flow.
+- Fit canvas to viewport.
+- Zoom/pan if required by the chosen canvas implementation.
 
-Navigation should use IntelliJ source navigation APIs and smart PSI pointers where appropriate.
+The current flow is ephemeral in v0.1 and is not required to survive IDE restart.
 
 ---
 
-## 12. Flow Pins
+## 11. Flow Pins and Saved Flows
 
-IntelliJ already has general-purpose bookmarks, so Flow Lens should not duplicate them directly.
+These are workflow features, not generic bookmarks.
 
-Instead, Flow Lens should introduce method-oriented `Flow Pins`.
+### Flow Pins
 
-Example:
-
-```text
-★ Payment Entry
-  PaymentController.purchase()
-
-★ Payment Core
-  PaymentService.execute()
-
-★ Transaction Lock
-  TransactionLock.acquire()
-```
-
-A Flow Pin represents a meaningful method/function entry point and should survive IDE restarts and ordinary source edits where IntelliJ can still resolve the symbol.
+A Flow Pin is a named function/method entry point used for quick navigation and re-analysis.
 
 Possible metadata:
 
-- User-defined display name.
-- Symbol reference.
-- File path.
-- Method signature.
+- User-defined name.
+- Stable symbol reference where possible.
+- File path/signature fallback.
 - Optional note.
 - Date pinned.
 
-Flow Pins are intended for quick navigation and for quickly starting a new analysis from a known entry point.
+### Saved Flows
 
----
-
-## 13. Saved Flows
-
-A Saved Flow stores an analysis configuration, not only a code location.
-
-Example:
-
-```text
-★ Purchase Flow
-  Entry: PaymentController.purchase()
-  Depth: 5
-  Nodes: 23
-
-★ Login Flow
-  Entry: AuthController.login()
-  Depth: 4
-  Nodes: 17
-```
-
-Saved Flow data should include:
+A Saved Flow stores:
 
 - Entry point.
-- Analysis settings.
 - User-defined name.
-- Optional selected implementation choices for ambiguous calls.
-- Optional collapsed/expanded UI state.
+- Analysis settings.
+- Later: candidate choices for ambiguous calls.
+- Later: collapsed/expanded UI state.
 
-The cached analysis graph itself may initially be regenerated on demand rather than persisted permanently.
-
-Future enhancement:
-
-- Detect when the source has changed since the last analysis.
-- Display `Flow changed` or `Needs re-analysis`.
-- Compare two flow snapshots.
+The graph itself may be regenerated rather than permanently persisted.
 
 ---
 
-## 14. Visualization Modes
+## 12. Language-Specific Future Semantics
 
-### v0.x Tree / Flow View
+The shared model should anticipate asynchronous and language-specific constructs without pretending they are synchronous.
 
-Start with the simplest maintainable visualization capable of expressing nesting and branches.
+Examples:
 
-Required capabilities:
+### Java
 
-- Expand/collapse nodes.
-- Show node type icons.
-- Show project vs external calls.
-- Show ambiguity and unresolved status.
-- Navigate to source.
+- Executor / CompletableFuture patterns may later create `ASYNC_BOUNDARY` nodes where reliably recognizable.
 
-### Future Graph View
+### Kotlin
 
-A node-edge graph can make larger flows easier to explore.
+- `launch`, `async`, coroutine boundaries, and suspend-related flow may later receive explicit async semantics.
 
-Desired interactions:
+### Go
 
-- Pan and zoom.
-- Expand on demand.
-- Collapse subtrees.
-- Highlight the selected path.
-- Fit graph to viewport.
+- `go f()` should eventually render as a goroutine fork/lane rather than a normal call.
+- Channel-related flow may be explored later, but complete concurrency modeling is not an initial goal.
 
-### Future Sequence View
-
-Sequence View should derive from the same analysis model.
-
-Conceptual output:
-
-```text
-Controller      Service       Repository      Gateway
-    │              │               │              │
-    │ purchase()   │               │              │
-    ├─────────────►│               │              │
-    │              │ findUser()    │              │
-    │              ├──────────────►│              │
-    │              │◄──────────────┤              │
-    │              │                              │
-    │              │ charge()                     │
-    │              ├─────────────────────────────►│
-    │              │◄─────────────────────────────┤
-```
-
-Sequence View should not be required for MVP.
+These advanced semantics are outside v0.1 unless implementation proves straightforward. The analyzer architecture must not block them.
 
 ---
 
-## 15. Analysis Progress UX
-
-The plugin should visibly communicate analysis progress without relying on decorative animation alone.
-
-Example status:
-
-```text
-Analyzing PaymentService.execute()
-
-14 methods resolved
- 8 project methods
- 3 branches
- 2 external calls
- 1 ambiguous call
-```
-
-As analysis proceeds, the UI may progressively add nodes or update counters.
-
-Requirements:
-
-- Analysis must be cancellable.
-- Long-running work must not block the EDT.
-- The current stage should be understandable.
-- Partial results should remain useful if analysis is cancelled or reaches limits.
-
----
-
-## 16. Export
-
-### Markdown
-
-Provide a text representation that is easy to paste into issues, documentation, or AI tools.
-
-Example:
-
-```markdown
-# Purchase Flow
-
-1. PaymentController.purchase()
-2. PaymentService.execute()
-3. PaymentRepository.find()
-4. PaymentGateway.charge()
-```
-
-### Mermaid
-
-Mermaid export is a strong fit because Flow Lens already produces structured graph data.
-
-Example:
-
-```mermaid
-sequenceDiagram
-    Controller->>Service: purchase()
-    Service->>Repository: find()
-    Repository-->>Service: User
-    Service->>Gateway: charge()
-```
-
-Possible export actions:
-
-- Copy as Markdown.
-- Copy as Mermaid flowchart.
-- Copy as Mermaid sequenceDiagram.
-
-Export should operate on the analysis model rather than scraping the rendered UI.
-
----
-
-## 17. Proposed Architecture
-
-Keep analysis, model, persistence, and rendering separated.
+## 13. Architecture
 
 ```text
 flow-lens
 ├─ analysis
-│  ├─ entrypoint
-│  ├─ traversal
+│  ├─ core
+│  ├─ java
+│  ├─ kotlin
+│  ├─ go
 │  ├─ resolution
-│  ├─ controlflow
+│  ├─ traversal
 │  └─ limits
-│
 ├─ model
+│  ├─ FlowAnalysisResult
 │  ├─ FlowGraph
 │  ├─ FlowNode
 │  ├─ FlowEdge
-│  └─ FlowAnalysisResult
-│
+│  ├─ FlowSymbol
+│  └─ FlowSourceLocation
 ├─ ui
 │  ├─ toolwindow
-│  ├─ tree
-│  ├─ graph
+│  ├─ canvas
+│  ├─ layout
+│  ├─ components
 │  └─ details
-│
 ├─ navigation
-│
 ├─ persistence
-│  ├─ FlowPins
-│  └─ SavedFlows
-│
+│  ├─ pins
+│  └─ savedflows
 ├─ export
 │  ├─ markdown
 │  └─ mermaid
-│
 └─ settings
 ```
 
-Exact package layout can change during implementation; the architectural boundary is more important than the names.
+Key boundaries:
 
-### Key principle
-
-The UI must consume a language-neutral `FlowAnalysisResult`.
-
-Language-specific PSI/UAST handling should stay behind the analysis layer so that adding support for another language does not require rewriting visualization or persistence code.
-
----
-
-## 18. Language Support Strategy
-
-Language support should be incremental.
-
-### Initial target
-
-Start with the language that provides the most reliable path to validating the core product, most likely Java on IntelliJ IDEA.
-
-### Next step
-
-Evaluate Kotlin/JVM through UAST and shared IntelliJ Platform abstractions.
-
-### Long-term
-
-Other IntelliJ-supported languages may be added through language-specific analyzers/adapters where sufficient PSI support exists.
-
-The plugin should not advertise a language as supported until method resolution, navigation, and core flow extraction work reliably for that language.
-
-Suggested abstraction:
-
-```text
-FlowLanguageAnalyzer
-  ├─ JavaFlowAnalyzer
-  ├─ KotlinFlowAnalyzer
-  └─ ...
-```
-
-Avoid forcing every language into UAST if PSI-native analysis is more accurate for a particular language.
+1. Analyzer code may depend on language-specific PSI/API types.
+2. `model` must not.
+3. Rendering consumes only the language-neutral analysis result.
+4. Export consumes the analysis model, never the rendered UI.
+5. Visual layout and visual semantics are separate from source-resolution logic.
 
 ---
 
-## 19. Performance and Threading
+## 14. Performance and Threading
 
-Performance is part of the product design, not a later optimization.
-
-Requirements:
-
-- Never perform significant analysis synchronously on the EDT.
-- Respect IntelliJ read actions and cancellation semantics.
-- Reuse IDE indexes and reference resolution APIs.
-- Stop early at configured limits.
-- Avoid whole-project scans during ordinary method analysis.
-- Consider memoizing repeated symbol resolution during one analysis session.
-- Avoid recursively expanding library source by default.
-
-Possible future optimization:
-
-- Cache per-method direct-flow extraction keyed by source modification state.
-- Invalidate cached fragments only when relevant PSI changes.
+- Never run meaningful analysis synchronously on the EDT.
+- Use IntelliJ read-action and cancellation semantics correctly.
+- Avoid whole-project scans during normal analysis.
+- Reuse indexes/reference-resolution facilities.
+- Enforce node/depth limits during traversal, not after building a huge graph.
+- Memoize repeated resolution work within one analysis when safe.
+- Do not recursively expand libraries by default.
+- Partial results must remain structurally valid while analysis is running.
 
 ---
 
-## 20. MVP Roadmap
+## 15. Roadmap
 
-## v0.1 — Method Call Flow
+### v0.1 — Multi-language Method Flow + Flow Canvas
 
-Goal: prove that a user can select a method and immediately understand what it calls.
+Goal: prove the complete core experience on Java, Kotlin, and Go.
 
 Scope:
 
-- IntelliJ Platform plugin skeleton.
-- `Analyze Execution Flow` editor action.
-- Resolve the current method.
-- Walk method body in source order.
-- Extract direct method calls.
-- Recursively analyze project-local methods.
-- Configurable max depth.
-- Max node limit.
+- IntelliJ plugin skeleton.
+- Java analyzer.
+- Kotlin analyzer.
+- Go analyzer.
+- Current method/function detection.
+- Calls and constructors/functions in evaluation order.
+- Recursive project-local analysis.
+- Depth = method/function boundary.
+- Node limit.
 - Cycle detection.
-- External/unresolved terminal nodes.
-- Tool Window.
-- Tree/flow visualization.
-- Node-to-source navigation.
-- Cancel running analysis.
+- External terminal nodes.
+- Unresolved terminal nodes.
+- Ambiguous terminal nodes without automatic implementation selection.
+- One active analysis per project.
+- Cancellation with partial results.
+- Flow Canvas in Tool Window.
+- Semantic node/card styling.
+- Progressive canvas growth and counters.
+- Source navigation.
 
-Acceptance criteria:
+Detailed semantics and acceptance cases are defined in `plan/V0.1_SPEC.md`.
 
-1. User can place the caret in a Java method and start Flow Lens.
-2. Direct calls appear in source order.
-3. Project-local calls can be expanded recursively up to the configured depth.
-4. Recursive calls do not hang the IDE.
-5. External and unresolved calls are visibly differentiated.
-6. Clicking a source-backed node navigates to the target declaration.
-7. Analysis remains cancellable and does not block the UI thread.
-
----
-
-## v0.2 — Control Flow
-
-Goal: make Flow Lens meaningfully different from Call Hierarchy.
-
-Scope:
+### v0.2 — Control Flow
 
 - `if / else`.
-- `switch`.
+- Java/Kotlin switch/when concepts.
+- Go switch/select exploration as appropriate.
 - loops.
 - `return`.
-- `throw`.
-- basic `try / catch / finally` representation.
-- explicit branch edges.
-- branch-aware rendering.
+- `throw` / panic-related representation where appropriate.
+- basic exception structures for JVM languages.
+- branch merge visualization.
+- loop containers.
 
-Acceptance criteria:
-
-1. The visualization preserves meaningful branch structure.
-2. Calls inside a branch are visually nested under that branch.
-3. Return and throw terminate the corresponding path in the model.
-4. Loops are represented without infinite expansion.
-
----
-
-## v0.3 — Developer Workflow
-
-Goal: make Flow Lens useful every day, not only as a one-shot visualizer.
-
-Scope:
+### v0.3 — Developer Workflow
 
 - Flow Pins.
 - Saved Flows.
 - Recent analyses.
 - Analyze from selected node.
-- Persist pins and saved flow definitions across IDE restarts.
-- Better analysis progress UI.
+- Persistent saved entry points.
+- Improved progress/status UX.
 
-Acceptance criteria:
+### v0.4 — Ambiguity and Sharing
 
-1. User can pin a method and jump back to it later.
-2. User can save a named analysis configuration.
-3. Saved items survive project restart.
-4. A saved entry can be re-analyzed without finding the method manually.
-
----
-
-## v0.4 — Sharing and Ambiguity
-
-Goal: make analysis results useful outside the plugin and more honest on polymorphic code.
-
-Scope:
-
-- Multiple implementation candidates.
-- Candidate selection/expansion.
+- Candidate implementation discovery and selective expansion.
 - Markdown export.
 - Mermaid flowchart export.
-- Mermaid sequence export where model data is sufficient.
-- Copy result for external analysis tools / AI.
+- Mermaid sequence export where valid.
+- Copy structured context for external AI/tools.
 
-Acceptance criteria:
+### v0.5+ — Advanced Exploration
 
-1. Ambiguous calls never silently appear as a single definite implementation.
-2. Users can inspect candidate implementations.
-3. Exported Mermaid renders into a useful diagram for typical flows.
-
----
-
-## v0.5+ — Advanced Exploration
-
-Candidate features:
-
-- Graph View.
 - Sequence View.
+- Alternative/free Graph View.
 - Flow snapshot comparison.
-- `Flow changed` detection.
+- Flow-change detection.
 - Framework-aware resolution helpers.
-- Module/package boundaries.
-- Filters and search inside large flows.
-- Highlight only one selected execution path.
-- Callers / reverse-flow analysis.
-- Test discovery for a selected flow.
-- Git diff overlay to show which nodes changed in the current branch.
-
-These are intentionally outside MVP.
-
----
-
-## 21. Open Design Questions
-
-The following should be decided through prototypes rather than prematurely fixed:
-
-1. Should the primary visualization live in a Tool Window, editor tab, or support both?
-2. Is the IntelliJ tree UI sufficient for v0.1, or is a custom graph component worth introducing immediately?
-3. How much branch structure can be extracted reliably with PSI alone versus using control-flow APIs available per language?
-4. How should method identity be persisted so Flow Pins survive refactors as well as possible?
-5. Should ambiguous targets be expanded automatically up to a small threshold or always require user action?
-6. Should recursion depth count only method boundaries or all structural flow nodes?
-7. How should lambdas and callbacks appear in the flow model?
-8. How should asynchronous boundaries such as futures/coroutines be represented without implying synchronous execution?
-9. What is the right language support boundary for the first public release?
+- Async visualization for Java/Kotlin.
+- Goroutine visualization for Go.
+- Search/filter in large flows.
+- Selected-path highlighting.
+- Reverse/caller analysis.
+- Test discovery.
+- Git diff overlay.
 
 ---
 
-## 22. Product Principles
+## 16. Fixed v0.1 Decisions
+
+These are no longer open design questions:
+
+1. Supported product languages are Java, Kotlin, and Go.
+2. v0.1 aims to prove basic method/function flow for all three.
+3. The primary UI is a Tool Window.
+4. The primary visualization is Flow Canvas, not a plain tree.
+5. The default reading direction is top-to-bottom.
+6. Depth counts method/function boundaries only.
+7. Ambiguous targets are not automatically expanded in v0.1.
+8. Calls are represented per call site, not deduplicated by target symbol.
+9. Evaluation order is preferred over naive PSI lexical traversal.
+10. Tests and libraries are excluded from recursive analysis by default.
+11. One analysis runs per project at a time.
+12. The current flow does not need to persist across restart in v0.1.
+
+---
+
+## 17. Remaining Open Questions
+
+These should be settled by focused prototypes because the correct answer depends on IntelliJ platform behavior or rendering feasibility:
+
+1. Exact PSI/UAST/API combination for each Java/Kotlin semantic case.
+2. Exact Go PSI/API integration boundary and plugin dependency arrangement.
+3. Canvas technology/layout engine capable of smooth nested expansion without fighting IntelliJ UI conventions.
+4. How aggressively layout should animate when nodes are inserted or expanded.
+5. Stable symbol persistence strategy for Flow Pins across refactors.
+6. Exact language-specific handling of lambdas, callbacks, coroutines, goroutines, and generated/framework code.
+7. Whether large flows should switch from automatic progressive layout to explicit user expansion at a threshold.
+
+Open questions must not redefine the product semantics already fixed above.
+
+---
+
+## 18. Product Principles
 
 ### Explain uncertainty
+Never manufacture certainty static analysis does not have.
 
-Static analysis has limits. Show those limits explicitly.
+### Preserve meaning
+Execution order, branch structure, async boundaries, project boundaries, and ambiguity matter more than raw edge count.
 
-### Analyze locally, not globally
-
-The user chooses the entry point. Flow Lens follows only what is relevant to that analysis.
-
-### Preserve code meaning
-
-Source order, branches, returns, loops, and ambiguity matter more than producing a visually impressive graph.
+### Visual semantics over decoration
+Animations and graphics must communicate analysis state or code meaning. Avoid motion that exists only to look busy.
 
 ### Progressive disclosure
+Show a comprehensible map first and allow deeper exploration without overwhelming the canvas.
 
-Start small and let users expand deeper paths on demand.
+### Language-neutral core
+Java, Kotlin, and Go should converge into one shared flow model and one visual language.
 
-### IDE-native first
-
-Use IntelliJ navigation, PSI, indexes, actions, persistence, progress, and UI conventions whenever they fit.
+### IDE-native navigation
+The map is an alternate way to understand code, never a dead-end diagram. Every meaningful source-backed element should lead back to code.
 
 ### Useful without AI
-
-The core feature must remain fully useful offline and without paid APIs. AI tools can consume exported context, but Flow Lens itself should not depend on them.
+AI integration is optional future interoperability. The product must be valuable on its own.
 
 ---
 
-## 23. Initial Product Statement
+## 19. Planning Documents
 
-**Flow Lens is an IntelliJ plugin that turns a selected method into an explorable static execution-flow map.**
-
-It helps developers answer:
-
-- What does this method call?
-- In what order does processing proceed?
-- Where does the flow branch?
-- Which calls leave the project?
-- Which targets are ambiguous?
-- Where can I jump next to understand this feature?
-
-The initial product should succeed at one thing before expanding further:
-
-> Right-click a method and get a useful, navigable picture of how that code flows.
+- `plan/PLAN.md` — product direction, architecture, and roadmap.
+- `plan/V0.1_SPEC.md` — executable v0.1 semantics and acceptance examples.
+- `plan/VISUAL_DESIGN.md` — Flow Lens visual language and interaction rules.
