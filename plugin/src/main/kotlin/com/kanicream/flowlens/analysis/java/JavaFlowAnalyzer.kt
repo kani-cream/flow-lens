@@ -6,6 +6,7 @@ import com.intellij.psi.PsiAnonymousClass
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiConditionalExpression
+import com.intellij.psi.PsiDoWhileStatement
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiIfStatement
@@ -163,6 +164,11 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
                     controlFlowSimplified = true
                     walk(element.condition)
                     conditional { element.thenExpression?.let(::walk); element.elseExpression?.let(::walk) }
+                }
+                is PsiDoWhileStatement -> {
+                    controlFlowSimplified = true
+                    // A do-while body and its condition both run at least once.
+                    element.children.forEach(::walk)
                 }
                 is PsiLoopStatement -> {
                     controlFlowSimplified = true

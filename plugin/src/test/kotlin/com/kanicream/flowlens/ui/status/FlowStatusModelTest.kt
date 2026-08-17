@@ -141,6 +141,22 @@ class FlowStatusModelTest : BasePlatformTestCase() {
         assertTrue(stillRunning.stopEnabled)
     }
 
+    fun `test a finished result wins over a lagging progress stage`() {
+        // The run publishes its terminal result before its terminal progress event,
+        // and the two are collected independently, so a completed analysis must not
+        // keep showing a running stage while the progress collector catches up.
+        val state = FlowStatusModel.stateOf(
+            progress(FlowProgressStage.RESOLVING_ROOT_CALLS),
+            result(FlowResultStatus.COMPLETED),
+        )
+        assertEquals(StatusTone.DONE, state.tone)
+        assertFalse(state.stopEnabled)
+        assertEquals(
+            com.kanicream.flowlens.FlowLensBundle.message("status.stage.COMPLETED"),
+            state.headline,
+        )
+    }
+
     fun `test terminal result without progress still renders its state`() {
         val state = FlowStatusModel.stateOf(null, result(FlowResultStatus.STALE))
         assertEquals(StatusTone.WARNING, state.tone)

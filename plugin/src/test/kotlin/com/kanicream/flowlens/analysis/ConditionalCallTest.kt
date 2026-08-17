@@ -163,6 +163,72 @@ class ConditionalCallTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(false, flow["e"])
     }
 
+    fun `test kotlin loop bodies are extracted exactly once`() {
+        // Regression: KtLoopExpression.getBody() returns a grandchild, so an
+        // identity-based split walked the body twice and emitted every call in a
+        // loop as two events, doubling cards and node-budget consumption.
+        val file = myFixture.configureByText(
+            "loops.kt",
+            """
+            fun run(items: List<Int>) {
+                while (cond()) { d() }
+                for (i in items) { e() }
+                do { f() } while (cond2())
+            }
+            fun cond(): Boolean = false
+            fun cond2(): Boolean = false
+            fun d() {} fun e() {} fun f() {}
+            """.trimIndent(),
+        )
+        val fn = PsiTreeUtil.findChildrenOfType(file, KtNamedFunction::class.java).first { it.name == "run" }
+        val calls = KotlinFlowAnalyzer().extractDirectFlow(fn).calls
+        assertEquals(
+            listOf("cond", "d", "e", "f", "cond2"),
+            calls.map { it.calleeShortName },
+        )
+        val flow = calls.associate { it.calleeShortName to it.conditional }
+        assertEquals("a while condition always runs at least once", false, flow["cond"])
+        assertEquals(true, flow["d"])
+        assertEquals(true, flow["e"])
+        assertEquals("a do-while body always runs once", false, flow["f"])
+        assertEquals(false, flow["cond2"])
+    }
+
+    fun `test java do while body and condition always run`() {
+        val flow = javaFlow("do { a(); } while (cond()); b();")
+        assertEquals(false, flow["a"])
+        assertEquals(false, flow["cond"])
+        assertEquals(false, flow["b"])
+    }
+
+    fun `test go while style loop condition always runs`() {
+        val file = myFixture.configureByText(
+            "loop.go",
+            """
+            package sample
+
+            func run() {
+                for cond() {
+                    a()
+                }
+                b()
+            }
+
+            func cond() bool { return false }
+            func a() {}
+            func b() {}
+            """.trimIndent(),
+        )
+        val fn = PsiTreeUtil.findChildrenOfType(file, GoFunctionOrMethodDeclaration::class.java)
+            .first { it.name == "run" }
+        val calls = GoFlowAnalyzer().extractDirectFlow(fn).calls
+        assertEquals(listOf("cond", "a", "b"), calls.map { it.calleeShortName })
+        val flow = calls.associate { it.calleeShortName to it.conditional }
+        assertEquals("a for-condition runs at least once", false, flow["cond"])
+        assertEquals(true, flow["a"])
+        assertEquals(false, flow["b"])
+    }
+
     fun `test straight line calls are never marked conditional`() {
         val flow = javaFlow("a(); b(); c();")
         assertEquals(listOf(false, false, false), listOf(flow["a"], flow["b"], flow["c"]))

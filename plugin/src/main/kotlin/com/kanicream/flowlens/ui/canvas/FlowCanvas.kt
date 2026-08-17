@@ -73,20 +73,25 @@ class FlowCanvas : JComponent() {
 
     fun selectedCard(): CardVM? = visibleCards.firstOrNull { it.nodeId == selectedNodeId }
 
-    fun toggleExpansion(card: CardVM) {
-        if (!card.expandable) return
+    /** Returns true when the expansion state actually changed. */
+    fun toggleExpansion(card: CardVM): Boolean {
+        if (!card.expandable) return false
         if (!expandedNodes.remove(card.nodeId)) expandedNodes += card.nodeId
         rebuild()
+        return true
     }
 
-    private fun expand(card: CardVM) {
-        if (!card.expandable || card.expanded) return
+    private fun expand(card: CardVM): Boolean {
+        if (!card.expandable || card.expanded) return false
         expandedNodes += card.nodeId
         rebuild()
+        return true
     }
 
-    private fun collapse(card: CardVM) {
-        if (expandedNodes.remove(card.nodeId)) rebuild()
+    private fun collapse(card: CardVM): Boolean {
+        if (!expandedNodes.remove(card.nodeId)) return false
+        rebuild()
+        return true
     }
 
     fun fitToView() {
@@ -375,31 +380,41 @@ class FlowCanvas : JComponent() {
     private fun installKeyboardHandling() {
         addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
-                when {
+                // Only consume keys that actually did something, so unused arrows
+                // still reach the scroll pane and pan a wide flow.
+                val handled = when {
                     e.keyCode == KeyEvent.VK_DOWN -> moveSelection(1)
                     e.keyCode == KeyEvent.VK_UP -> moveSelection(-1)
                     // Shift+Enter is the explicit call-site action; plain Enter keeps
                     // the documented default of opening the target (`V0.1_SPEC.md` §18).
                     e.keyCode == KeyEvent.VK_ENTER && e.isShiftDown ->
-                        selectedCard()?.let(onNavigateToCallSite)
-                    e.keyCode == KeyEvent.VK_ENTER -> selectedCard()?.let(onNavigateToTarget)
-                    e.keyCode == KeyEvent.VK_SPACE -> selectedCard()?.let(::toggleExpansion)
-                    e.keyCode == KeyEvent.VK_RIGHT -> selectedCard()?.let(::expand)
-                    e.keyCode == KeyEvent.VK_LEFT -> selectedCard()?.let(::collapse)
-                    e.keyCode == KeyEvent.VK_ESCAPE -> select(null)
-                    else -> return
+                        selectedCard()?.also(onNavigateToCallSite) != null
+                    e.keyCode == KeyEvent.VK_ENTER ->
+                        selectedCard()?.also(onNavigateToTarget) != null
+                    e.keyCode == KeyEvent.VK_SPACE -> selectedCard()?.let(::toggleExpansion) == true
+                    e.keyCode == KeyEvent.VK_RIGHT -> selectedCard()?.let(::expand) == true
+                    e.keyCode == KeyEvent.VK_LEFT -> selectedCard()?.let(::collapse) == true
+                    e.keyCode == KeyEvent.VK_ESCAPE -> {
+                        val hadSelection = selectedNodeId != null
+                        select(null)
+                        hadSelection
+                    }
+                    else -> false
                 }
-                e.consume()
+                if (handled) e.consume()
             }
         })
     }
 
-    private fun moveSelection(delta: Int) {
-        if (visibleCards.isEmpty()) return
+    /** Returns true when the selection actually moved. */
+    private fun moveSelection(delta: Int): Boolean {
+        if (visibleCards.isEmpty()) return false
         val index = visibleCards.indexOfFirst { it.nodeId == selectedNodeId }
         val next = (if (index < 0) 0 else index + delta).coerceIn(0, visibleCards.lastIndex)
+        if (next == index) return false
         select(visibleCards[next])
         scrollToCard(visibleCards[next])
+        return true
     }
 
     private fun scrollToCard(card: CardVM) {

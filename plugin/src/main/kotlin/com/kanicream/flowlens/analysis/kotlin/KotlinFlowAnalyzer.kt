@@ -20,6 +20,7 @@ import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtClass
 import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtConstructor
+import org.jetbrains.kotlin.psi.KtDoWhileExpression
 import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
 import org.jetbrains.kotlin.psi.KtSuperExpression
 import org.jetbrains.kotlin.psi.KtIfExpression
@@ -196,10 +197,22 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                     element.subjectExpression?.let(::walk)
                     conditional { element.entries.forEach(::walk) }
                 }
+                is KtDoWhileExpression -> {
+                    controlFlowSimplified = true
+                    // A do-while body and its condition both run at least once.
+                    element.children.forEach(::walk)
+                }
                 is KtLoopExpression -> {
                     controlFlowSimplified = true
-                    element.children.filter { it !== element.body }.forEach(::walk)
-                    conditional { element.body?.let(::walk) }
+                    // `KtLoopExpression.getBody()` returns the expression inside a
+                    // container node, so it is a grandchild: the body's owning child
+                    // must be found by containment. Comparing by identity would walk
+                    // the body twice and emit every call in it as two events.
+                    val body = element.body
+                    for (child in element.children) {
+                        val isBody = body != null && PsiTreeUtil.isAncestor(child, body, false)
+                        if (isBody) conditional { walk(child) } else walk(child)
+                    }
                 }
                 is KtTryExpression -> {
                     controlFlowSimplified = true

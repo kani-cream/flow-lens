@@ -43,7 +43,14 @@ object FlowStatusModel {
                 diagnostics = emptyList(),
             )
         }
-        val stage = progress?.stage ?: stageOf(result!!.status)
+        // The result reaches its terminal state before the terminal progress event,
+        // and the two are collected by independently throttled collectors, so a
+        // finished run must not keep showing a running stage.
+        val stage = when {
+            result?.isTerminal == true -> stageOf(result.status)
+            progress != null -> progress.stage
+            else -> stageOf(result!!.status)
+        }
         // Either signal reaching a terminal state ends the run; if only one of them
         // has been observed yet, that one decides.
         val running = !(progress?.isTerminal ?: false) && !(result?.isTerminal ?: false)

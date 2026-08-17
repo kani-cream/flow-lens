@@ -9,17 +9,25 @@ import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
 import com.kanicream.flowlens.FlowLensBundle
 
-/** Project settings UI: analysis bounds and traversal policy. */
-class FlowLensConfigurable(project: Project) : BoundConfigurable(DISPLAY_NAME) {
+/**
+ * Project settings UI: analysis bounds and traversal policy.
+ *
+ * Bindings read and write through the settings service on every access rather
+ * than through a captured state object: `loadState` replaces that object, so a
+ * settings import or external change while the dialog is open would otherwise
+ * make Apply write into an orphaned instance and silently lose the edit.
+ */
+class FlowLensConfigurable(private val project: Project) : BoundConfigurable(DISPLAY_NAME) {
 
-    private val state: FlowLensSettings.State = FlowLensSettings.getInstance(project).state
+    private val state: FlowLensSettings.State
+        get() = FlowLensSettings.getInstance(project).state
 
     override fun createPanel(): DialogPanel = panel {
         group(FlowLensBundle.message("settings.group.limits")) {
             row(FlowLensBundle.message("settings.max.depth")) {
                 intTextField(FlowLensSettings.MIN_DEPTH..FlowLensSettings.MAX_DEPTH)
                     .columns(4)
-                    .bindIntText(state::maxDepth)
+                    .bindIntText({ state.maxDepth }, { state.maxDepth = it })
             }
             row {
                 comment(FlowLensBundle.message("settings.max.depth.comment"))
@@ -27,7 +35,7 @@ class FlowLensConfigurable(project: Project) : BoundConfigurable(DISPLAY_NAME) {
             row(FlowLensBundle.message("settings.max.nodes")) {
                 intTextField(FlowLensSettings.MIN_NODES..FlowLensSettings.MAX_NODES)
                     .columns(4)
-                    .bindIntText(state::maxNodes)
+                    .bindIntText({ state.maxNodes }, { state.maxNodes = it })
             }
             row {
                 comment(FlowLensBundle.message("settings.max.nodes.comment"))
@@ -36,14 +44,14 @@ class FlowLensConfigurable(project: Project) : BoundConfigurable(DISPLAY_NAME) {
         group(FlowLensBundle.message("settings.group.traversal")) {
             row {
                 checkBox(FlowLensBundle.message("settings.include.tests"))
-                    .bindSelected(state::includeTests)
+                    .bindSelected({ state.includeTests }, { state.includeTests = it })
             }
             row {
                 comment(FlowLensBundle.message("settings.include.tests.comment"))
             }
             row {
                 checkBox(FlowLensBundle.message("settings.include.libraries"))
-                    .bindSelected(state::includeLibraries)
+                    .bindSelected({ state.includeLibraries }, { state.includeLibraries = it })
             }
             row {
                 comment(FlowLensBundle.message("settings.include.libraries.comment"))

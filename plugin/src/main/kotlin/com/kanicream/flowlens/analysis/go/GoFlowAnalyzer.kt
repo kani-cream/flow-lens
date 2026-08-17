@@ -153,8 +153,14 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                 }
                 is GoForStatement -> {
                     controlFlowSimplified = true
-                    // The for/range clause runs; the body may execute zero times.
-                    val header = listOfNotNull(element.forClause, element.rangeClause)
+                    // The clause and the while-style condition run; only the body
+                    // may execute zero times. `for cond() { }` exposes its condition
+                    // through getExpression(), not through a for/range clause.
+                    val header = listOfNotNull(
+                        element.forClause,
+                        element.rangeClause,
+                        element.expression,
+                    )
                     walkSplit(element) { child -> containsAny(child, header) }
                 }
                 is GoSwitchStatement, is GoSelectStatement -> {

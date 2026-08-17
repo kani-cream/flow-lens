@@ -28,6 +28,7 @@ import com.kanicream.flowlens.core.model.FlowSymbol
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.core.model.RunId
 import com.kanicream.flowlens.core.model.SourceOrigin
+import com.intellij.openapi.application.readAction
 import com.intellij.openapi.application.smartReadAction
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -394,7 +395,11 @@ internal class FlowAnalysisRun(
             key = "$languageId:?#$shortName",
         )
 
-    private fun isIndexing(): Boolean = DumbService.getInstance(project).isDumb
+    /**
+     * Read under a read action: `DumbService.isDumb` documents that contract and
+     * logs an error when the platform's dumb-contract check is enabled.
+     */
+    private suspend fun isIndexing(): Boolean = readAction { DumbService.getInstance(project).isDumb }
 
     private fun progress(stage: FlowProgressStage) {
         publishProgress(buildProgress(stage))
