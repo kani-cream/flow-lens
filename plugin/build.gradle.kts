@@ -43,6 +43,8 @@ dependencies {
         // (flow-lens-go.xml): Flow Lens must load and analyze Java/Kotlin without it.
         plugin("org.jetbrains.plugins.go", "261.26222.22")
         testFramework(TestFrameworkType.Platform)
+        // Java-specific fixtures (LightJavaCodeInsightFixtureTestCase, mock JDK).
+        testFramework(TestFrameworkType.Plugin.Java)
     }
 
     testImplementation("junit:junit:4.13.2")

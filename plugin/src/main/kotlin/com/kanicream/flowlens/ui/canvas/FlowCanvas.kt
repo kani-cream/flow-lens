@@ -1,6 +1,7 @@
 package com.kanicream.flowlens.ui.canvas
 
 import com.intellij.ui.JBColor
+import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.kanicream.flowlens.FlowLensBundle
@@ -375,9 +376,9 @@ class FlowCanvas : JComponent() {
         repaint()
     }
 
-    private fun totalScale(): Double = zoom * JBUI.scale(1f)
+    private fun totalScale(): Double = zoom * JBUIScale.scale(1f)
 
-    private fun scaled(logical: Int): Int = (logical * JBUI.scale(1f)).roundToInt()
+    private fun scaled(logical: Int): Int = (logical * JBUIScale.scale(1f)).roundToInt()
 
     private fun scaledZoomed(logical: Int): Int = (logical * totalScale()).roundToInt()
 

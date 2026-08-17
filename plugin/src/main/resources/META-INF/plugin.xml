@@ -42,6 +42,13 @@
         <flowLanguageAnalyzer implementation="com.kanicream.flowlens.analysis.java.JavaFlowAnalyzer"/>
     </extensions>
 
+    <!-- Required for the optional Kotlin descriptor to load at all: without a K2
+         compatibility declaration the platform refuses flow-lens-kotlin.xml. The
+         declaration must live in the main descriptor, not in the optional one. -->
+    <extensions defaultExtensionNs="org.jetbrains.kotlin">
+        <supportsKotlinPluginMode supportsK2="true"/>
+    </extensions>
+
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow id="Flow Lens"
                     anchor="right"

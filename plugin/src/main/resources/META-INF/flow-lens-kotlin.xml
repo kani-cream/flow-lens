@@ -5,4 +5,5 @@
         <flowLanguageAnalyzer
             implementation="com.kanicream.flowlens.analysis.kotlin.KotlinFlowAnalyzer"/>
     </extensions>
+
 </idea-plugin>
