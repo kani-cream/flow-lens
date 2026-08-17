@@ -259,6 +259,39 @@ class CanvasViewModelTest : BasePlatformTestCase() {
         )
     }
 
+    fun `test a go method keeps its receiver without repeating it`() {
+        // Regression: Go puts the receiver in the name (Server.Start), so
+        // qualifying by the container as well printed Server.Server.Start().
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(
+            FlowSymbol("go", "run()", "main", "go:main.run"),
+            null,
+        )
+        b.addEvent(
+            root,
+            spec("start").copy(
+                targetSymbol = FlowSymbol("go", "Server.Start()", "main", "go:main.Server.Start"),
+            ),
+        )
+        b.addEvent(
+            root,
+            spec("notify").copy(
+                targetSymbol = FlowSymbol("go", "notify()", "main", "go:main.notify"),
+            ),
+        )
+        b.addEvent(
+            root,
+            spec("other").copy(
+                targetSymbol = FlowSymbol("go", "Helper()", "util", "go:util.Helper"),
+            ),
+        )
+        val cards = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!.cards
+        assertEquals("Server.Start()", cards[0].title)
+        assertEquals("a same-package call crosses nothing", "notify()", cards[1].title)
+        assertEquals("another package is worth saying", "util.Helper()", cards[2].title)
+    }
+
     fun `test the tooltip says in words what the glyphs abbreviate`() {
         val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
         val root = b.openRootFrame(symbol("root"), null)

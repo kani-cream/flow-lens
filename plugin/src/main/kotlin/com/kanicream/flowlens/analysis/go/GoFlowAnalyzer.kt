@@ -107,6 +107,13 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
         )
     }
 
+    /**
+     * Go names a method as `Server.Start`, so the receiver belongs to the display
+     * name, and the scope a call can leave is the package, not the type. The
+     * container is therefore the package: qualifying by the receiver as well
+     * printed `Server.Server.Start()`, and qualifying same-package functions by
+     * their type printed `main.notify()` for a call that crosses nothing.
+     */
     private fun symbolOf(declaration: GoFunctionOrMethodDeclaration): FlowSymbol {
         val name = declaration.name ?: "?"
         val receiver = (declaration as? GoMethodDeclaration)
@@ -116,7 +123,7 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
         return FlowSymbol(
             languageId = languageId,
             displayName = display,
-            containerName = receiver ?: packageName,
+            containerName = packageName,
             key = "go:${packageName ?: "?"}.${receiver?.plus(".") ?: ""}$name",
         )
     }
