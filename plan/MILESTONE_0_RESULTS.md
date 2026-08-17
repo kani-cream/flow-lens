@@ -197,9 +197,12 @@ project) are **not yet measured** — scheduled for v0.1 hardening per
    navigate to the entry declaration on double-click (V0.1_SPEC §18) — added;
    (b) navigation dereferenced a smart pointer on the EDT without a read
    action, logging a threading assertion — wrapped in `ReadAction.compute`.
-   Still outstanding: installed-ZIP (non-sandbox) check, Kotlin/mixed sample
-   pass in the sandbox, theme/keyboard/Japanese-UI sweep of the full manual
-   checklist.
+   Go navigation and the Open Call Site path were re-verified after the fixes
+   with a clean log (0 errors, 0 threading assertions). Owner decision
+   (2026-08-17): the installed-ZIP (non-sandbox) check and the full manual
+   checklist sweep (themes/keyboard/Japanese UI) are deliberately deferred
+   until after v0.1 implementation is complete, not blockers for closing
+   Milestone 0.
 2. **Go-plugin-absent runtime path untested in a live IDE.** Structurally
    guaranteed (optional descriptor + bytecode isolation test), but the
    "IDE without Go still starts and analyzes Java/Kotlin" scenario should be
