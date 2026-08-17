@@ -31,9 +31,16 @@ enum class CardStyle {
 /** One rendered call card. Bounds are absolute canvas coordinates in logical units. */
 class CardVM(
     val node: FlowNode,
+    /** Container-qualified only when the call leaves the enclosing type. */
     val title: String,
-    val subtitle: String?,
-    val badges: List<String>,
+    /** One glyph for the target's certainty: unresolved, ambiguous, declared, generated. */
+    val stateGlyph: String?,
+    /** One glyph for execution semantics: goroutine or deferred. */
+    val executionGlyph: String?,
+    /** Short trailing note for rare facts such as test sources. */
+    val trailingNote: String?,
+    /** Full localized state, shown on hover because the glyphs are compact. */
+    val tooltip: String,
     val style: CardStyle,
     val depthLabel: String,
     val boundaryBeforeCard: Boolean,
@@ -95,9 +102,15 @@ class FrameVM(
 /** Logical (unscaled) layout constants; the canvas applies zoom and UI scale. */
 object CanvasMetrics {
     const val CARD_WIDTH = 260
-    const val CARD_HEIGHT = 46
-    const val CARD_BADGE_EXTRA = 18
-    const val CONNECTOR_GAP = 26
+
+    /**
+     * One line per call. A flow is a sequence, so it grows downwards by nature;
+     * the way to keep it readable is to spend as little height per call as
+     * possible, not to break the sequence into columns. Everything that does not
+     * fit on the line lives in the details panel and the hover tooltip.
+     */
+    const val CARD_HEIGHT = 30
+    const val CONNECTOR_GAP = 20
     const val BOUNDARY_GAP = 40
     const val FRAME_PADDING = 14
     const val FRAME_HEADER = 34
@@ -150,7 +163,9 @@ object CanvasViewModelBuilder {
         expandedNodes: Set<NodeId>,
         isRoot: Boolean,
     ): FrameVM {
-        val cards = frame.events.map { node -> cardVM(result, node, expandedNodes) }
+        val cards = frame.events.map { node ->
+            cardVM(result, node, expandedNodes, ownerType = frame.symbol.containerName)
+        }
         return FrameVM(
             frameId = frame.id,
             title = frame.symbol.displayName,
@@ -180,6 +195,7 @@ object CanvasViewModelBuilder {
         result: FlowAnalysisResult,
         node: FlowNode,
         expandedNodes: Set<NodeId>,
+        ownerType: String?,
     ): CardVM {
         val style = styleOf(node)
         val childFrame = node.targetFrameId?.let(result::frame)
@@ -194,9 +210,15 @@ object CanvasViewModelBuilder {
         }
         return CardVM(
             node = node,
-            title = titleOf(node),
-            subtitle = node.targetSymbol?.containerName,
-            badges = badgesOf(node, style),
+            title = titleOf(node, ownerType),
+            stateGlyph = stateGlyphOf(node, style),
+            executionGlyph = executionGlyphOf(node),
+            trailingNote = if (node.metadata[FlowMetadata.TEST_SOURCE] == "true") {
+                FlowLensBundle.message("card.badge.test.source")
+            } else {
+                null
+            },
+            tooltip = tooltipOf(node),
             style = style,
             depthLabel = FlowLensBundle.message("card.depth.label", node.depth),
             boundaryBeforeCard = node.resolutionStatus == ResolutionStatus.EXTERNAL,
@@ -230,43 +252,66 @@ object CanvasViewModelBuilder {
         else -> CardStyle.PROJECT_CALL
     }
 
-    private fun titleOf(node: FlowNode): String = when (node.kind) {
+    /**
+     * The callable's name, qualified by its type only when that type differs from
+     * the one whose body we are reading. Repeating the enclosing type on every
+     * card costs a line and says nothing; showing it when it changes turns it
+     * into a signal that the call leaves the current type.
+     */
+    private fun titleOf(node: FlowNode, ownerType: String?): String = when (node.kind) {
         FlowNodeKind.LIMIT -> FlowLensBundle.message("card.limit.node")
         FlowNodeKind.CYCLE -> FlowLensBundle.message(
             "card.cycle.label", node.targetSymbol?.displayName ?: "?",
         )
-        else -> node.targetSymbol?.displayName ?: "?"
+        else -> {
+            val symbol = node.targetSymbol ?: return "?"
+            val container = symbol.containerName
+            if (container != null && container != ownerType) {
+                "$container.${symbol.displayName}"
+            } else {
+                symbol.displayName
+            }
+        }
     }
 
-    private fun badgesOf(node: FlowNode, style: CardStyle): List<String> = buildList {
-        when (style) {
-            CardStyle.DECLARED_TARGET -> add(FlowLensBundle.message("card.badge.declared.target"))
-            CardStyle.AMBIGUOUS -> add(FlowLensBundle.message("card.badge.ambiguous"))
-            CardStyle.UNRESOLVED -> add(FlowLensBundle.message("card.badge.unresolved"))
-            CardStyle.EXTERNAL -> add(FlowLensBundle.message("card.badge.external"))
-            CardStyle.BUILT_IN -> add(FlowLensBundle.message("card.badge.built.in"))
-            else -> Unit
+    /**
+     * Card style already carries external, unresolved, and ambiguous states
+     * through the box treatment, so only what the box cannot say gets a glyph.
+     */
+    private fun stateGlyphOf(node: FlowNode, style: CardStyle): String? = when {
+        style == CardStyle.UNRESOLVED -> "?"
+        style == CardStyle.AMBIGUOUS -> "◇"
+        style == CardStyle.DECLARED_TARGET -> "◆"
+        node.metadata[FlowMetadata.ORIGIN] == SourceOrigin.SYNTHETIC.name -> "⊘"
+        node.kind == FlowNodeKind.CONSTRUCTOR -> "+"
+        else -> null
+    }
+
+    private fun executionGlyphOf(node: FlowNode): String? = when (node.executionMode) {
+        ExecutionMode.GOROUTINE -> "⚡"
+        ExecutionMode.DEFERRED -> "↩"
+        else -> null
+    }
+
+    /** The full state in words, since the card itself only has room for glyphs. */
+    private fun tooltipOf(node: FlowNode): String = buildList {
+        node.targetSymbol?.let { symbol ->
+            add(listOfNotNull(symbol.containerName, symbol.displayName).joinToString("."))
+            add(symbol.languageId)
         }
-        if (node.kind == FlowNodeKind.CONSTRUCTOR) {
-            add(FlowLensBundle.message("card.badge.constructor"))
+        node.resolutionStatus?.let { add(FlowLensBundle.message("enum.resolution.${it.name}")) }
+        node.dispatchConfidence?.let { add(FlowLensBundle.message("enum.dispatch.${it.name}")) }
+        if (node.executionMode != ExecutionMode.SYNC) {
+            add(FlowLensBundle.message("enum.execution.${node.executionMode.name}"))
         }
-        when (node.executionMode) {
-            ExecutionMode.GOROUTINE -> add(FlowLensBundle.message("card.badge.goroutine"))
-            ExecutionMode.DEFERRED -> add(FlowLensBundle.message("card.badge.deferred"))
-            else -> Unit
+        node.metadata[FlowMetadata.ORIGIN]?.let { add(FlowLensBundle.message("enum.origin.$it")) }
+        if (node.metadata[FlowMetadata.CONDITIONAL] == "true") {
+            add(FlowLensBundle.message("details.conditional.hint"))
         }
         if (node.metadata[FlowMetadata.LIMIT] == FlowMetadata.LIMIT_DEPTH) {
-            add(FlowLensBundle.message("card.limit.depth"))
+            add(FlowLensBundle.message("details.limit.depth"))
         }
-        if (node.metadata[FlowMetadata.TEST_SOURCE] == "true") {
-            add(FlowLensBundle.message("card.badge.test.source"))
-        }
-        // A generated member has no authored body to open, so say why rather than
-        // letting the card look like an ordinary call that simply has no calls.
-        if (node.metadata[FlowMetadata.ORIGIN] == SourceOrigin.SYNTHETIC.name) {
-            add(FlowLensBundle.message("card.badge.generated"))
-        }
-    }
+    }.joinToString(" · ")
 
     // ---- layout ----
 
@@ -305,8 +350,7 @@ object CanvasViewModelBuilder {
                     CanvasMetrics.CONNECTOR_GAP
                 }
             }
-            val headerHeight = CanvasMetrics.CARD_HEIGHT +
-                if (card.badges.isEmpty()) 0 else CanvasMetrics.CARD_BADGE_EXTRA
+            val headerHeight = CanvasMetrics.CARD_HEIGHT
             card.bounds = Rectangle(cardX, cursorY, contentWidth, headerHeight)
             cursorY += headerHeight
 

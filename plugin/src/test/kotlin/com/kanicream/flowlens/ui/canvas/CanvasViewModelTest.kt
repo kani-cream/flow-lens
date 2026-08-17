@@ -160,7 +160,7 @@ class CanvasViewModelTest : BasePlatformTestCase() {
         assertEquals(styles.size, styles.distinct().size)
     }
 
-    fun `test external calls get a boundary marker and goroutine defer get badges`() {
+    fun `test external calls get a boundary marker and goroutine defer get glyphs`() {
         val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
         val root = b.openRootFrame(symbol("root"), null)
         b.addEvent(root, spec("post", resolution = ResolutionStatus.EXTERNAL))
@@ -170,9 +170,62 @@ class CanvasViewModelTest : BasePlatformTestCase() {
             .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!.cards
         assertTrue(cards[0].boundaryBeforeCard)
         assertFalse(cards[1].boundaryBeforeCard)
-        assertTrue(cards[1].badges.isNotEmpty())
-        assertTrue(cards[2].badges.isNotEmpty())
-        assertTrue(cards[1].badges.single() != cards[2].badges.single())
+        assertNotNull(cards[1].executionGlyph)
+        assertNotNull(cards[2].executionGlyph)
+        assertFalse(
+            "goroutine and deferred must not look the same",
+            cards[1].executionGlyph == cards[2].executionGlyph,
+        )
+    }
+
+    fun `test one line cards keep the flow as short as the sequence allows`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), null)
+        repeat(10) { b.addEvent(root, spec("call$it")) }
+        val cards = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!.cards
+        // Every card costs the same height whatever it has to say, so a long flow
+        // grows linearly and predictably rather than by however many badges the
+        // analyzer happened to produce.
+        assertEquals(1, cards.map { it.bounds.height }.distinct().size)
+        val pitch = cards[1].bounds.y - cards[0].bounds.y
+        assertTrue("one call must cost about one line, was ${pitch}px", pitch <= 56)
+        assertEquals(pitch, cards[9].bounds.y - cards[8].bounds.y)
+    }
+
+    fun `test a call is qualified only when it leaves the enclosing type`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(
+            FlowSymbol("java", "run()", "Owner", "java:Owner#run"),
+            null,
+        )
+        b.addEvent(root, spec("sameType"))
+        b.addEvent(
+            root,
+            spec("otherType").copy(
+                targetSymbol = FlowSymbol("java", "work()", "Service", "java:Service#work"),
+            ),
+        )
+        val cards = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!.cards
+        assertEquals("sameType()", cards[0].title)
+        assertEquals(
+            "a call that leaves the type says so instead of repeating the owner",
+            "Service.work()",
+            cards[1].title,
+        )
+    }
+
+    fun `test the tooltip says in words what the glyphs abbreviate`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), null)
+        b.addEvent(root, spec("declared", dispatch = DispatchConfidence.DECLARED_TARGET))
+        val card = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!.cards.single()
+        assertEquals("◆", card.stateGlyph)
+        assertTrue(card.tooltip.isNotBlank())
+        assertFalse("the tooltip must not leak bundle keys", card.tooltip.contains("enum."))
+        assertTrue(card.tooltip.contains("Owner"))
     }
 
     fun `test non deterministic ordering uses a different connector treatment`() {

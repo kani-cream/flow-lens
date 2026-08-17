@@ -25,6 +25,7 @@ import java.awt.geom.AffineTransform
 import javax.swing.JComponent
 import javax.swing.JViewport
 import javax.swing.SwingUtilities
+import javax.swing.ToolTipManager
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -55,6 +56,7 @@ class FlowCanvas : JComponent() {
 
     init {
         isFocusable = true
+        ToolTipManager.sharedInstance().registerComponent(this)
         installMouseHandling()
         installKeyboardHandling()
     }
@@ -342,52 +344,42 @@ class FlowCanvas : JComponent() {
         g2.drawRoundRect(box.x, box.y, box.width, box.height, 12, 12)
     }
 
+    /**
+     * One line per call: state and execution glyphs, the callable, and a compact
+     * right-hand group for expansion state and depth. Everything else is in the
+     * details panel and the hover tooltip.
+     */
     private fun paintCardContent(g2: Graphics2D, card: CardVM) {
         val b = card.bounds
-        val textX = b.x + 12
+        val baseline = b.y + b.height / 2 + 5
         g2.font = JBUI.Fonts.label()
-        g2.color = if (card.style == CardStyle.LIMIT || card.style == CardStyle.CYCLE) {
-            Palette.mutedText
-        } else {
-            Palette.text
-        }
-        val glyph = when (card.style) {
-            CardStyle.UNRESOLVED -> "? "
-            CardStyle.AMBIGUOUS -> "◇ "
-            CardStyle.CYCLE, CardStyle.LIMIT -> ""
-            else -> ""
-        }
-        g2.drawString(truncate(g2, glyph + card.title, b.width - 60), textX, b.y + 19)
 
+        val trailing = buildString {
+            when {
+                card.resolving -> append(FlowLensBundle.message("card.resolving"))
+                card.expandable -> append(if (card.expanded) "▾ " else "▸ ").append(card.callsInside)
+            }
+            card.trailingNote?.let {
+                if (isNotEmpty()) append("  ")
+                append(it)
+            }
+            if (isNotEmpty()) append("   ")
+            append(card.depthLabel)
+        }
         g2.font = JBUI.Fonts.smallFont()
+        val trailingWidth = g2.fontMetrics.stringWidth(trailing)
         g2.color = Palette.mutedText
-        val secondLine = buildString {
-            card.subtitle?.let { append(it) }
-            if (card.expandable) {
-                if (isNotEmpty()) append("  ")
-                append(if (card.expanded) "▾ " else "▸ ")
-                append(FlowLensBundle.message("card.calls.inside", card.callsInside))
-            }
-            if (card.resolving) {
-                if (isNotEmpty()) append("  ")
-                append(FlowLensBundle.message("card.resolving"))
-            }
-        }
-        if (secondLine.isNotEmpty()) {
-            g2.drawString(truncate(g2, secondLine, b.width - 60), textX, b.y + 35)
-        }
-        // Depth tag, right-aligned.
-        g2.drawString(card.depthLabel, b.x + b.width - 34, b.y + 19)
+        g2.drawString(trailing, b.x + b.width - trailingWidth - 10, baseline)
 
-        if (card.badges.isNotEmpty()) {
-            g2.font = JBUI.Fonts.miniFont()
-            g2.color = Palette.badgeText
-            g2.drawString(
-                truncate(g2, card.badges.joinToString("  "), b.width - 24),
-                textX,
-                b.y + b.height - 8,
-            )
+        val prefix = listOfNotNull(card.stateGlyph, card.executionGlyph).joinToString(" ")
+        g2.font = JBUI.Fonts.label()
+        g2.color = when (card.style) {
+            CardStyle.LIMIT, CardStyle.CYCLE -> Palette.mutedText
+            else -> Palette.text
         }
+        val available = b.width - trailingWidth - 26
+        val text = if (prefix.isEmpty()) card.title else "$prefix ${card.title}"
+        g2.drawString(truncate(g2, text, available), b.x + 12, baseline)
     }
 
     private fun cardBackground(style: CardStyle): Color = when (style) {
@@ -444,6 +436,12 @@ class FlowCanvas : JComponent() {
             override fun mouseReleased(e: MouseEvent) {
                 dragStart = null
                 dragOrigin = null
+            }
+
+            override fun mouseMoved(e: MouseEvent) {
+                // The card shows compact glyphs, so hovering must be able to say
+                // the same thing in words.
+                toolTipText = cardAt(e.point)?.tooltip?.takeIf { it.isNotBlank() }
             }
 
             override fun mouseDragged(e: MouseEvent) {
