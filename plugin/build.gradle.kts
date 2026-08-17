@@ -78,6 +78,8 @@ tasks.test {
 }
 
 intellijPlatform {
+    // Distribution/sandbox name; the Gradle subproject stays ":plugin".
+    projectName = "flow-lens"
     pluginConfiguration {
         version = project.version.toString()
         ideaVersion {
