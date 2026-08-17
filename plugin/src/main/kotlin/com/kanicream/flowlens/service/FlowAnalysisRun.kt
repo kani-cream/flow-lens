@@ -56,6 +56,7 @@ internal class FlowAnalysisRun(
     private val publishProgress: (FlowProgress) -> Unit,
 ) {
     private val startNanos = System.nanoTime()
+    private var operationIndex = 0
     private var nodesProduced = 0
     private var framesAnalyzed = 0
     private var exactCount = 0
@@ -73,6 +74,7 @@ internal class FlowAnalysisRun(
             // when the IDE is actually indexing: progress must describe real work
             // (guardrails section 10), never a stage the run did not enter.
             if (isIndexing()) progress(FlowProgressStage.WAITING_FOR_INDEXES)
+            FlowRunHooks.fire(FlowRunHooks.FrameOperation(index = 0, depth = 0))
             val root = smartReadAction(project) { findRoot() }
             if (root == null) {
                 progress(FlowProgressStage.FAILED)
@@ -121,6 +123,8 @@ internal class FlowAnalysisRun(
                     },
                 )
 
+                operationIndex += 1
+                FlowRunHooks.fire(FlowRunHooks.FrameOperation(operationIndex, task.depth))
                 val computation = try {
                     smartReadAction(project) { computeFrame(task, root.modificationCount) }
                 } catch (e: CancellationException) {
