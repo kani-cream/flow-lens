@@ -11,4 +11,12 @@ object FlowMetadata {
 
     /** Present ("true") when the target declaration is in test sources. */
     const val TEST_SOURCE = "flowlens.testSource"
+
+    /**
+     * Present ("true") when the call may not execute because it sits inside a
+     * branch, loop body, catch clause, or short-circuit operand. v0.1 has no
+     * branch model, so the renderer uses this instead of drawing a connector
+     * that would claim a proven path (`V0.1_SPEC.md` §13).
+     */
+    const val CONDITIONAL = "flowlens.conditional"
 }

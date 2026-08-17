@@ -21,6 +21,13 @@ class ExtractedCall(
     val calleeShortName: String,
     val executionMode: ExecutionMode = ExecutionMode.SYNC,
     val orderingStatus: OrderingStatus = OrderingStatus.DETERMINISTIC,
+    /**
+     * True when the call sits inside a branch, loop body, catch clause, or
+     * short-circuit operand, so it may not execute even though its relative
+     * order is known. v0.1 has no branch model, so the renderer uses this to
+     * avoid drawing a connector that claims a proven path (`V0.1_SPEC.md` §13).
+     */
+    val conditional: Boolean = false,
 )
 
 /** The ordered direct flow of one callable body. */
@@ -36,6 +43,11 @@ class ResolvedCallTarget(
     val resolutionStatus: ResolutionStatus,
     val dispatchConfidence: DispatchConfidence,
     val sourceOrigin: SourceOrigin,
+    /**
+     * True when the analyzer could traverse this declaration's body. This is a
+     * language fact only; whether the body may actually be entered is a traversal
+     * policy decision (origin, project membership, settings) made by the engine.
+     */
     val hasAnalyzableBody: Boolean,
     val isConstructor: Boolean = false,
     val inTestSource: Boolean = false,

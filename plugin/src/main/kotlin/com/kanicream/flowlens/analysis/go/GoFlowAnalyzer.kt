@@ -1,7 +1,10 @@
 package com.kanicream.flowlens.analysis.go
 
-import com.goide.GoLanguage
+import com.goide.psi.GoAndExpr
+import com.goide.psi.GoBinaryExpr
+import com.goide.psi.GoCaseClause
 import com.goide.psi.GoCallExpr
+import com.goide.psi.GoOrExpr
 import com.goide.psi.GoDeferStatement
 import com.goide.psi.GoFile
 import com.goide.psi.GoForStatement
@@ -123,6 +126,9 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
         val calls = mutableListOf<ExtractedCall>()
         var controlFlowSimplified = false
 
+        /** > 0 while walking code that may not execute (branch, loop body, case). */
+        private var conditionalDepth = 0
+
         fun walk(element: PsiElement) {
             when (element) {
                 is PsiComment -> return
@@ -136,12 +142,63 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                         kind = FlowNodeKind.CALL,
                         calleeShortName = calleeNameOf(element),
                         executionMode = executionModeOf(element),
+                        conditional = conditionalDepth > 0,
                     )
                 }
-                else -> {
-                    if (isControlFlowConstruct(element)) controlFlowSimplified = true
-                    element.children.forEach(::walk)
+                is GoIfStatement -> {
+                    controlFlowSimplified = true
+                    // Init statement and condition always run; the branches may not.
+                    val header = listOfNotNull(element.initStatement, element.condition)
+                    walkSplit(element) { child -> containsAny(child, header) }
                 }
+                is GoForStatement -> {
+                    controlFlowSimplified = true
+                    // The for/range clause runs; the body may execute zero times.
+                    val header = listOfNotNull(element.forClause, element.rangeClause)
+                    walkSplit(element) { child -> containsAny(child, header) }
+                }
+                is GoSwitchStatement, is GoSelectStatement -> {
+                    controlFlowSimplified = true
+                    // The header (subject expression, init statement) always runs;
+                    // only the case/comm clauses are selected at runtime.
+                    walkSplit(element) { child -> child !is GoCaseClause }
+                }
+                is GoAndExpr, is GoOrExpr -> {
+                    controlFlowSimplified = true
+                    // Short-circuit: the right operand may never be evaluated.
+                    val binary = element as GoBinaryExpr
+                    binary.left?.let(::walk)
+                    conditional { binary.right?.let(::walk) }
+                }
+                else -> element.children.forEach(::walk)
+            }
+        }
+
+        /**
+         * Walks every direct child exactly once, in source order; children for
+         * which [alwaysRuns] is false are walked as conditional code.
+         *
+         * Splitting by direct child (rather than by walking getter results
+         * directly) keeps each subtree visited once: Go PSI getters such as
+         * `GoIfStatement.getCondition()` return a nested element, so walking both
+         * the getter result and the children would emit the condition's calls twice.
+         */
+        private inline fun walkSplit(element: PsiElement, alwaysRuns: (PsiElement) -> Boolean) {
+            for (child in element.children) {
+                if (alwaysRuns(child)) walk(child) else conditional { walk(child) }
+            }
+        }
+
+        /** True when [child] is, or contains, any of [parts]. */
+        private fun containsAny(child: PsiElement, parts: List<PsiElement>): Boolean =
+            parts.any { PsiTreeUtil.isAncestor(child, it, false) }
+
+        private inline fun conditional(block: () -> Unit) {
+            conditionalDepth += 1
+            try {
+                block()
+            } finally {
+                conditionalDepth -= 1
             }
         }
 
@@ -161,11 +218,5 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                 else -> ExecutionMode.SYNC
             }
         }
-
-        private fun isControlFlowConstruct(element: PsiElement): Boolean =
-            element is GoIfStatement ||
-                element is GoForStatement ||
-                element is GoSwitchStatement ||
-                element is GoSelectStatement
     }
 }

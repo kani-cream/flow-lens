@@ -125,6 +125,9 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
         val calls = mutableListOf<ExtractedCall>()
         var controlFlowSimplified = false
 
+        /** > 0 while walking code that may not execute (branch, loop body, catch). */
+        private var conditionalDepth = 0
+
         fun walk(element: PsiElement) {
             when (element) {
                 is PsiComment -> return
@@ -135,39 +138,87 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
                 is PsiMethodCallExpression -> {
                     element.methodExpression.qualifierExpression?.let(::walk)
                     element.argumentList.expressions.forEach(::walk)
-                    calls += ExtractedCall(
-                        callSite = element,
-                        kind = FlowNodeKind.CALL,
-                        calleeShortName = element.methodExpression.referenceName
-                            ?: element.methodExpression.text,
+                    addCall(
+                        element,
+                        FlowNodeKind.CALL,
+                        element.methodExpression.referenceName ?: element.methodExpression.text,
                     )
                 }
                 is PsiNewExpression -> {
                     element.qualifier?.let(::walk)
                     element.argumentList?.expressions?.forEach(::walk)
                     // An anonymous class body is a boundary; its arguments were walked above.
-                    calls += ExtractedCall(
-                        callSite = element,
-                        kind = FlowNodeKind.CONSTRUCTOR,
-                        calleeShortName = element.classReference?.referenceName ?: "new",
+                    addCall(
+                        element,
+                        FlowNodeKind.CONSTRUCTOR,
+                        element.classReference?.referenceName ?: "new",
                     )
                 }
+                is PsiIfStatement -> {
+                    controlFlowSimplified = true
+                    element.condition?.let(::walk)
+                    conditional { element.thenBranch?.let(::walk); element.elseBranch?.let(::walk) }
+                }
+                is PsiConditionalExpression -> {
+                    controlFlowSimplified = true
+                    walk(element.condition)
+                    conditional { element.thenExpression?.let(::walk); element.elseExpression?.let(::walk) }
+                }
+                is PsiLoopStatement -> {
+                    controlFlowSimplified = true
+                    // Everything but the loop body is walked in place; the body may
+                    // run zero times.
+                    element.children.filter { it !== element.body }.forEach(::walk)
+                    conditional { element.body?.let(::walk) }
+                }
+                is PsiSwitchBlock -> {
+                    controlFlowSimplified = true
+                    element.expression?.let(::walk)
+                    conditional { element.body?.let(::walk) }
+                }
+                is PsiTryStatement -> {
+                    controlFlowSimplified = true
+                    // try and finally blocks run; catch sections only on failure.
+                    element.resourceList?.let(::walk)
+                    element.tryBlock?.let(::walk)
+                    conditional { element.catchSections.forEach(::walk) }
+                    element.finallyBlock?.let(::walk)
+                }
+                is PsiPolyadicExpression -> {
+                    val shortCircuit = element.operationTokenType == JavaTokenType.ANDAND ||
+                        element.operationTokenType == JavaTokenType.OROR
+                    if (!shortCircuit) {
+                        element.children.forEach(::walk)
+                        return
+                    }
+                    controlFlowSimplified = true
+                    val operands = element.operands
+                    operands.firstOrNull()?.let(::walk)
+                    conditional { operands.drop(1).forEach(::walk) }
+                }
                 else -> {
-                    if (isControlFlowConstruct(element)) controlFlowSimplified = true
                     if (element is PsiAnonymousClass) return
                     element.children.forEach(::walk)
                 }
             }
         }
 
-        private fun isControlFlowConstruct(element: PsiElement): Boolean =
-            element is PsiIfStatement ||
-                element is PsiLoopStatement ||
-                element is PsiSwitchBlock ||
-                element is PsiConditionalExpression ||
-                element is PsiTryStatement ||
-                (element is PsiPolyadicExpression &&
-                    (element.operationTokenType == JavaTokenType.ANDAND ||
-                        element.operationTokenType == JavaTokenType.OROR))
+        private fun addCall(callSite: PsiElement, kind: FlowNodeKind, shortName: String) {
+            calls += ExtractedCall(
+                callSite = callSite,
+                kind = kind,
+                calleeShortName = shortName,
+                conditional = conditionalDepth > 0,
+            )
+        }
+
+        private inline fun conditional(block: () -> Unit) {
+            conditionalDepth += 1
+            try {
+                block()
+            } finally {
+                conditionalDepth -= 1
+            }
+        }
     }
 }

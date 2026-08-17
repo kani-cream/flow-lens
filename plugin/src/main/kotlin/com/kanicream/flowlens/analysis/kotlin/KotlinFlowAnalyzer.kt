@@ -20,7 +20,8 @@ import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtClass
 import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtConstructor
-import org.jetbrains.kotlin.psi.KtDeclaration
+import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
+import org.jetbrains.kotlin.psi.KtSuperExpression
 import org.jetbrains.kotlin.psi.KtIfExpression
 import org.jetbrains.kotlin.psi.KtLambdaExpression
 import org.jetbrains.kotlin.psi.KtLoopExpression
@@ -86,7 +87,10 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
         val resolved = callee.mainReference?.resolve() ?: return ResolvedCallTarget.UNRESOLVED
         val isConstructor = resolved is KtConstructor<*> || resolved is KtClass ||
             (resolved is PsiMethod && resolved.isConstructor)
-        val confidence = dispatchConfidenceOf(resolved)
+        // `super.foo()` names one implementation statically, like Java's super call.
+        val explicitSuper = (site.parent as? KtDotQualifiedExpression)
+            ?.receiverExpression is KtSuperExpression
+        val confidence = if (explicitSuper) DispatchConfidence.EXACT else dispatchConfidenceOf(resolved)
         return TargetClassifier.classify(
             site.project,
             resolved,
@@ -160,6 +164,9 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
         val calls = mutableListOf<ExtractedCall>()
         var controlFlowSimplified = false
 
+        /** > 0 while walking code that may not execute (branch, loop body, catch). */
+        private var conditionalDepth = 0
+
         fun walk(element: PsiElement) {
             when (element) {
                 // Boundaries (KNOWN_LIMITATIONS.md section 11).
@@ -176,21 +183,52 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                         kind = FlowNodeKind.CALL,
                         calleeShortName = (element.calleeExpression as? KtNameReferenceExpression)
                             ?.getReferencedName() ?: element.calleeExpression?.text ?: "?",
+                        conditional = conditionalDepth > 0,
                     )
                 }
-                else -> {
-                    if (isControlFlowConstruct(element)) controlFlowSimplified = true
-                    element.children.forEach(::walk)
+                is KtIfExpression -> {
+                    controlFlowSimplified = true
+                    element.condition?.let(::walk)
+                    conditional { element.then?.let(::walk); element.`else`?.let(::walk) }
                 }
+                is KtWhenExpression -> {
+                    controlFlowSimplified = true
+                    element.subjectExpression?.let(::walk)
+                    conditional { element.entries.forEach(::walk) }
+                }
+                is KtLoopExpression -> {
+                    controlFlowSimplified = true
+                    element.children.filter { it !== element.body }.forEach(::walk)
+                    conditional { element.body?.let(::walk) }
+                }
+                is KtTryExpression -> {
+                    controlFlowSimplified = true
+                    walk(element.tryBlock)
+                    conditional { element.catchClauses.forEach(::walk) }
+                    element.finallyBlock?.let(::walk)
+                }
+                is KtBinaryExpression -> {
+                    val shortCircuit = element.operationToken == KtTokens.ANDAND ||
+                        element.operationToken == KtTokens.OROR
+                    if (!shortCircuit) {
+                        element.children.forEach(::walk)
+                        return
+                    }
+                    controlFlowSimplified = true
+                    element.left?.let(::walk)
+                    conditional { element.right?.let(::walk) }
+                }
+                else -> element.children.forEach(::walk)
             }
         }
 
-        private fun isControlFlowConstruct(element: PsiElement): Boolean =
-            element is KtIfExpression ||
-                element is KtWhenExpression ||
-                element is KtLoopExpression ||
-                element is KtTryExpression ||
-                (element is KtBinaryExpression &&
-                    (element.operationToken == KtTokens.ANDAND || element.operationToken == KtTokens.OROR))
+        private inline fun conditional(block: () -> Unit) {
+            conditionalDepth += 1
+            try {
+                block()
+            } finally {
+                conditionalDepth -= 1
+            }
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.kanicream.flowlens.service
 
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.progress.ProcessCanceledException
+import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiManager
@@ -12,6 +13,8 @@ import com.kanicream.flowlens.core.engine.FlowEventSpec
 import com.kanicream.flowlens.core.engine.FlowModelBuilder
 import com.kanicream.flowlens.core.engine.PendingFrame
 import com.kanicream.flowlens.core.engine.PendingFrameQueue
+import com.kanicream.flowlens.core.engine.TargetFacts
+import com.kanicream.flowlens.core.engine.TraversalPolicy
 import com.kanicream.flowlens.core.model.DispatchConfidence
 import com.kanicream.flowlens.core.model.FlowDiagnostic
 import com.kanicream.flowlens.core.model.FlowDiagnosticSeverity
@@ -66,9 +69,10 @@ internal class FlowAnalysisRun(
         var builder: FlowModelBuilder? = null
         try {
             // smartReadAction waits for indexes instead of producing mass UNRESOLVED
-            // output (V0.1_SPEC.md section 15); the visible waiting state comes from
-            // this stage event.
-            progress(FlowProgressStage.WAITING_FOR_INDEXES)
+            // output (V0.1_SPEC.md section 15). The waiting stage is published only
+            // when the IDE is actually indexing: progress must describe real work
+            // (guardrails section 10), never a stage the run did not enter.
+            if (isIndexing()) progress(FlowProgressStage.WAITING_FOR_INDEXES)
             val root = smartReadAction(project) { findRoot() }
             if (root == null) {
                 progress(FlowProgressStage.FAILED)
@@ -110,8 +114,11 @@ internal class FlowAnalysisRun(
                 currentCoroutineContext().ensureActive()
                 val task = queue.dequeue() ?: break
                 progress(
-                    if (task.depth == 0) FlowProgressStage.RESOLVING_ROOT_CALLS
-                    else FlowProgressStage.ANALYZING_CHILD_FRAMES,
+                    when {
+                        isIndexing() -> FlowProgressStage.WAITING_FOR_INDEXES
+                        task.depth == 0 -> FlowProgressStage.RESOLVING_ROOT_CALLS
+                        else -> FlowProgressStage.ANALYZING_CHILD_FRAMES
+                    },
                 )
 
                 val computation = try {
@@ -331,13 +338,18 @@ internal class FlowAnalysisRun(
             val metadata = buildMap {
                 put(FlowMetadata.ORIGIN, target.sourceOrigin.name)
                 if (target.inTestSource) put(FlowMetadata.TEST_SOURCE, "true")
+                if (extracted.conditional) put(FlowMetadata.CONDITIONAL, "true")
             }
-            val recursable = target.hasAnalyzableBody &&
-                target.resolutionStatus == ResolutionStatus.PROJECT_LOCAL &&
-                target.sourceOrigin == SourceOrigin.PHYSICAL_SOURCE &&
-                (target.dispatchConfidence == DispatchConfidence.EXACT ||
-                    target.dispatchConfidence == DispatchConfidence.DECLARED_TARGET) &&
-                (limits.includeTests || !target.inTestSource)
+            val recursable = TraversalPolicy.mayEnterBody(
+                TargetFacts(
+                    hasAnalyzableBody = target.hasAnalyzableBody,
+                    origin = target.sourceOrigin,
+                    resolution = target.resolutionStatus,
+                    dispatch = target.dispatchConfidence,
+                    inTestSource = target.inTestSource,
+                ),
+                limits,
+            )
             val symbol = target.symbol ?: fallbackSymbol(analyzer.languageId, extracted.calleeShortName)
             ComputedCall(
                 spec = FlowEventSpec(
@@ -377,6 +389,8 @@ internal class FlowAnalysisRun(
             containerName = null,
             key = "$languageId:?#$shortName",
         )
+
+    private fun isIndexing(): Boolean = DumbService.getInstance(project).isDumb
 
     private fun progress(stage: FlowProgressStage) {
         publishProgress(buildProgress(stage))

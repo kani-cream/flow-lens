@@ -43,9 +43,9 @@ object TargetClassifier {
             SourceOrigin.LIBRARY -> ResolutionStatus.EXTERNAL
             else -> PsiClassification.resolutionStatusOf(project, declaration)
         }
-        val hasBody = !forceNoBody &&
-            origin == SourceOrigin.PHYSICAL_SOURCE &&
-            analyzer?.hasAnalyzableBody(declaration) == true
+        // Language fact only. Whether this body may be entered is decided by the
+        // traversal policy (origin, project membership, settings snapshot).
+        val hasBody = !forceNoBody && analyzer?.hasAnalyzableBody(declaration) == true
 
         return ResolvedCallTarget(
             declaration = declaration,
