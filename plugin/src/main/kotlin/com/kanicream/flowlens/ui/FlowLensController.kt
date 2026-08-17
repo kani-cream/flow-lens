@@ -13,6 +13,7 @@ import com.kanicream.flowlens.core.model.RunId
 import com.kanicream.flowlens.service.FlowAnalysisService
 import com.kanicream.flowlens.ui.canvas.CardVM
 import com.kanicream.flowlens.ui.canvas.FlowCanvas
+import com.kanicream.flowlens.ui.canvas.FlowCanvasActions
 import com.kanicream.flowlens.ui.canvas.FrameVM
 import com.kanicream.flowlens.ui.details.FlowDetailsPanel
 import com.kanicream.flowlens.ui.status.FlowStatusModel
@@ -43,7 +44,10 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
     private var currentRunId: RunId? = null
     private var running = false
 
+    private val canvasActions = FlowCanvasActions(canvas, this)
+
     init {
+        canvas.onContextMenu = canvasActions::showContextMenu
         canvas.onSelectionChanged = selectionModel::select
         canvas.onNavigateToTarget = { card -> navigateTo(card.node.preferredNavigationLocation) }
         canvas.onNavigateToCallSite = { card -> navigateTo(card.node.callSiteLocation) }

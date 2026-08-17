@@ -44,6 +44,7 @@ class FlowCanvas : JComponent() {
     var onNavigateToTarget: (CardVM) -> Unit = {}
     var onNavigateToCallSite: (CardVM) -> Unit = {}
     var onNavigateToFrameEntry: (FrameVM) -> Unit = {}
+    var onContextMenu: (Point) -> Unit = {}
 
     private var result: FlowAnalysisResult? = null
     private val expandedNodes = mutableSetOf<NodeId>()
@@ -227,6 +228,13 @@ class FlowCanvas : JComponent() {
             g2.color = if (capability.available) Palette.text else Palette.mutedText
             g2.drawString(text, max(12, (width - small.stringWidth(text)) / 2), y)
         }
+
+        // The keyboard contract is easiest to learn before there is anything to
+        // read on the canvas; it disappears as soon as a flow is drawn.
+        y += small.height + 12
+        val keys = FlowLensBundle.message("toolwindow.key.hints")
+        g2.color = Palette.mutedText
+        g2.drawString(keys, max(12, (width - small.stringWidth(keys)) / 2), y)
     }
 
     /** Only the root frame draws a container of its own; calls own their bodies. */
@@ -429,6 +437,11 @@ class FlowCanvas : JComponent() {
             override fun mousePressed(e: MouseEvent) {
                 requestFocusInWindow()
                 val card = cardAt(e.point)
+                if (e.isPopupTrigger) {
+                    select(card)
+                    onContextMenu(e.point)
+                    return
+                }
                 if (card == null) {
                     dragStart = e.locationOnScreen
                     dragOrigin = visibleRect.location
@@ -450,6 +463,11 @@ class FlowCanvas : JComponent() {
             override fun mouseReleased(e: MouseEvent) {
                 dragStart = null
                 dragOrigin = null
+                // Popup triggers arrive on release on some platforms.
+                if (e.isPopupTrigger) {
+                    select(cardAt(e.point))
+                    onContextMenu(e.point)
+                }
             }
 
             override fun mouseMoved(e: MouseEvent) {
@@ -501,25 +519,10 @@ class FlowCanvas : JComponent() {
                 val handled = when {
                     e.keyCode == KeyEvent.VK_DOWN -> moveSelection(1)
                     e.keyCode == KeyEvent.VK_UP -> moveSelection(-1)
-                    // Shift+Enter is the explicit call-site action; plain Enter keeps
-                    // the documented default of opening the target (`V0.1_SPEC.md` §18).
-                    e.keyCode == KeyEvent.VK_ENTER && e.isShiftDown ->
-                        selectedCard()?.also(onNavigateToCallSite) != null
-                    e.keyCode == KeyEvent.VK_ENTER ->
-                        selectedCard()?.also(onNavigateToTarget) != null
-                    e.keyCode == KeyEvent.VK_SPACE -> selectedCard()?.let(::toggleExpansion) == true
+                    // Enter, Shift+Enter, Space, and the zoom keys are registered
+                    // actions so they appear in the keymap and the context menu.
                     e.keyCode == KeyEvent.VK_RIGHT -> selectedCard()?.let(::expand) == true
                     e.keyCode == KeyEvent.VK_LEFT -> selectedCard()?.let(::collapse) == true
-                    isZoomShortcut(e) && (e.keyCode == KeyEvent.VK_EQUALS ||
-                        e.keyCode == KeyEvent.VK_PLUS || e.keyCode == KeyEvent.VK_ADD) -> {
-                        zoomIn()
-                        true
-                    }
-                    isZoomShortcut(e) && (e.keyCode == KeyEvent.VK_MINUS ||
-                        e.keyCode == KeyEvent.VK_SUBTRACT) -> {
-                        zoomOut()
-                        true
-                    }
                     isZoomShortcut(e) && e.keyCode == KeyEvent.VK_0 -> {
                         resetZoom()
                         true

@@ -27,8 +27,14 @@ class FlowDetailsPanel(
     private val title = JBLabel().apply { font = JBFont.label().asBold() }
     private val subtitle = JBLabel().apply { foreground = JBColor.GRAY }
     private val rows = JPanel(GridBagLayout())
-    private val openTarget = JButton(FlowLensBundle.message("details.action.open.target"))
-    private val openCallSite = JButton(FlowLensBundle.message("details.action.open.call.site"))
+    // The shortcut is shown on the button because that is where the user is
+    // already looking when they perform the action for the first time.
+    private val openTarget = JButton(
+        FlowLensBundle.message("details.action.open.target.with.shortcut"),
+    )
+    private val openCallSite = JButton(
+        FlowLensBundle.message("details.action.open.call.site.with.shortcut"),
+    )
 
     init {
         border = JBUI.Borders.compound(
