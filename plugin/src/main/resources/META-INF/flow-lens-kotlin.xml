@@ -1,0 +1,9 @@
+<idea-plugin>
+    <!-- Loaded only when the Kotlin plugin is available. Java analysis and the rest of
+         Flow Lens work without it; Kotlin capability is reported as unavailable. -->
+    <extensions defaultExtensionNs="com.kanicream.flowlens">
+        <flowLanguageAnalyzer
+            implementation="com.kanicream.flowlens.analysis.kotlin.KotlinFlowAnalyzer"/>
+    </extensions>
+
+</idea-plugin>

@@ -1,0 +1,65 @@
+<idea-plugin>
+    <id>com.kanicream.flowlens</id>
+    <name>Flow Lens</name>
+    <vendor>kani-cream</vendor>
+
+    <description><![CDATA[
+        <p>Flow Lens turns a selected function or method into an explorable static
+        execution-flow map. Select a method, see where the code flows, and jump back
+        to the source at any point.</p>
+
+        <p>Flow Lens follows reachable explicit calls within bounded limits, preserves
+        meaningful evaluation order, exposes uncertainty instead of hiding it, and
+        renders the result as a navigable Flow Canvas.</p>
+
+        <p><b>Languages</b>: Java, Kotlin, and Go (when the JetBrains Go plugin is
+        installed). Analysis may cross Java/Kotlin boundaries.</p>
+
+        <p>Flow Lens is local-first: it calls no AI API, requires no server, and sends
+        nothing anywhere.</p>
+    ]]></description>
+
+    <resource-bundle>messages.FlowLensBundle</resource-bundle>
+
+    <depends>com.intellij.modules.platform</depends>
+    <!-- The Java analyzer and Java PSI resolution. Flow Lens targets IntelliJ IDEA
+         Ultimate, where the Java module is always available. -->
+    <depends>com.intellij.modules.java</depends>
+
+    <!-- Kotlin analysis; optional so a disabled Kotlin plugin cannot prevent startup. -->
+    <depends optional="true" config-file="flow-lens-kotlin.xml">org.jetbrains.kotlin</depends>
+    <!-- Go analysis; optional so Flow Lens works on IDEs without the Go plugin. -->
+    <depends optional="true" config-file="flow-lens-go.xml">org.jetbrains.plugins.go</depends>
+
+    <extensionPoints>
+        <!-- Language analyzers register here; optional language descriptors contribute
+             their analyzer only when the language plugin is present. -->
+        <extensionPoint name="flowLanguageAnalyzer"
+                        interface="com.kanicream.flowlens.analysis.FlowLanguageAnalyzer"/>
+    </extensionPoints>
+
+    <extensions defaultExtensionNs="com.kanicream.flowlens">
+        <flowLanguageAnalyzer implementation="com.kanicream.flowlens.analysis.java.JavaFlowAnalyzer"/>
+    </extensions>
+
+    <!-- Required for the optional Kotlin descriptor to load at all: without a K2
+         compatibility declaration the platform refuses flow-lens-kotlin.xml. The
+         declaration must live in the main descriptor, not in the optional one. -->
+    <extensions defaultExtensionNs="org.jetbrains.kotlin">
+        <supportsKotlinPluginMode supportsK2="true"/>
+    </extensions>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Flow Lens"
+                    anchor="right"
+                    icon="/icons/flowLens.svg"
+                    factoryClass="com.kanicream.flowlens.ui.FlowLensToolWindowFactory"/>
+    </extensions>
+
+    <actions>
+        <action id="com.kanicream.flowlens.AnalyzeFlow"
+                class="com.kanicream.flowlens.action.AnalyzeFlowAction">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>

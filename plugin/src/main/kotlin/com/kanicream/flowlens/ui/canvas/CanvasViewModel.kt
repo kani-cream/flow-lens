@@ -1,0 +1,239 @@
+package com.kanicream.flowlens.ui.canvas
+
+import com.kanicream.flowlens.FlowLensBundle
+import com.kanicream.flowlens.core.model.DispatchConfidence
+import com.kanicream.flowlens.core.model.ExecutionMode
+import com.kanicream.flowlens.core.model.FlowAnalysisResult
+import com.kanicream.flowlens.core.model.FlowFrame
+import com.kanicream.flowlens.core.model.FlowNode
+import com.kanicream.flowlens.core.model.FlowNodeKind
+import com.kanicream.flowlens.core.model.NodeId
+import com.kanicream.flowlens.core.model.OrderingStatus
+import com.kanicream.flowlens.core.model.ResolutionStatus
+import com.kanicream.flowlens.service.FlowMetadata
+import java.awt.Rectangle
+
+/** Visual treatment category of a card; states stay distinguishable without color alone. */
+enum class CardStyle {
+    ENTRY,
+    PROJECT_CALL,
+    DECLARED_TARGET,
+    AMBIGUOUS,
+    UNRESOLVED,
+    EXTERNAL,
+    BUILT_IN,
+    CYCLE,
+    LIMIT,
+}
+
+/** One rendered call card. Bounds are absolute canvas coordinates in logical units. */
+class CardVM(
+    val node: FlowNode,
+    val title: String,
+    val subtitle: String?,
+    val badges: List<String>,
+    val style: CardStyle,
+    val depthLabel: String,
+    val boundaryBeforeCard: Boolean,
+    val dashedIncomingConnector: Boolean,
+    val expandable: Boolean,
+    val expanded: Boolean,
+    val callsInside: Int,
+    val childFrame: FrameVM?,
+) {
+    val nodeId: NodeId get() = node.id
+    var bounds: Rectangle = Rectangle()
+}
+
+/** One rendered frame container (analyzed callable body). */
+class FrameVM(
+    val frameId: com.kanicream.flowlens.core.model.FrameId,
+    val title: String,
+    val subtitle: String,
+    val isRoot: Boolean,
+    val entryLocation: com.kanicream.flowlens.core.model.FlowLocation?,
+    val cards: List<CardVM>,
+) {
+    var bounds: Rectangle = Rectangle()
+
+    /** The clickable header strip; double-click opens the entry declaration. */
+    val headerBounds: Rectangle
+        get() = Rectangle(bounds.x, bounds.y, bounds.width, CanvasMetrics.FRAME_HEADER)
+}
+
+/** Logical (unscaled) layout constants; the canvas applies zoom and UI scale. */
+object CanvasMetrics {
+    const val CARD_WIDTH = 260
+    const val CARD_HEIGHT = 46
+    const val CARD_BADGE_EXTRA = 18
+    const val CONNECTOR_GAP = 26
+    const val BOUNDARY_GAP = 40
+    const val FRAME_PADDING = 14
+    const val FRAME_HEADER = 34
+    const val CHILD_INDENT = 18
+    const val CANVAS_MARGIN = 24
+}
+
+/**
+ * Builds the view-model tree for one result snapshot and computes a stable
+ * top-to-bottom layout. Deterministic: an unchanged prefix of the model keeps its
+ * positions when new content is appended, so progressive updates do not shuffle
+ * the existing map.
+ */
+object CanvasViewModelBuilder {
+
+    fun build(result: FlowAnalysisResult, expandedNodes: Set<NodeId>): FrameVM? {
+        val root = result.rootFrame ?: return null
+        val rootVM = frameVM(result, root, expandedNodes, isRoot = true)
+        layoutFrame(rootVM, CanvasMetrics.CANVAS_MARGIN, CanvasMetrics.CANVAS_MARGIN)
+        return rootVM
+    }
+
+    /** All cards currently visible, in top-to-bottom layout order, for keyboard navigation. */
+    fun visibleCards(root: FrameVM?): List<CardVM> {
+        val out = mutableListOf<CardVM>()
+        fun collect(frame: FrameVM) {
+            for (card in frame.cards) {
+                out += card
+                card.childFrame?.let(::collect)
+            }
+        }
+        root?.let(::collect)
+        return out
+    }
+
+    private fun frameVM(
+        result: FlowAnalysisResult,
+        frame: FlowFrame,
+        expandedNodes: Set<NodeId>,
+        isRoot: Boolean,
+    ): FrameVM {
+        val cards = frame.events.map { node -> cardVM(result, node, expandedNodes) }
+        return FrameVM(
+            frameId = frame.id,
+            title = frame.symbol.displayName,
+            subtitle = listOfNotNull(
+                frame.symbol.containerName,
+                frame.symbol.languageId,
+                FlowLensBundle.message("card.depth.label", frame.depth),
+            ).joinToString(" · "),
+            isRoot = isRoot,
+            entryLocation = frame.entryLocation,
+            cards = cards,
+        )
+    }
+
+    /** All visible frames (root plus expanded child frames), deepest last. */
+    fun visibleFrames(root: FrameVM?): List<FrameVM> {
+        val out = mutableListOf<FrameVM>()
+        fun collect(frame: FrameVM) {
+            out += frame
+            frame.cards.forEach { it.childFrame?.let(::collect) }
+        }
+        root?.let(::collect)
+        return out
+    }
+
+    private fun cardVM(
+        result: FlowAnalysisResult,
+        node: FlowNode,
+        expandedNodes: Set<NodeId>,
+    ): CardVM {
+        val style = styleOf(node)
+        val childFrame = node.targetFrameId?.let(result::frame)
+        val expandable = childFrame != null && childFrame.events.isNotEmpty()
+        val expanded = expandable && node.id in expandedNodes
+        val childVM = if (expanded && childFrame != null) {
+            frameVM(result, childFrame, expandedNodes, isRoot = false)
+        } else {
+            null
+        }
+        return CardVM(
+            node = node,
+            title = titleOf(node),
+            subtitle = node.targetSymbol?.containerName,
+            badges = badgesOf(node, style),
+            style = style,
+            depthLabel = FlowLensBundle.message("card.depth.label", node.depth),
+            boundaryBeforeCard = node.resolutionStatus == ResolutionStatus.EXTERNAL,
+            dashedIncomingConnector = node.orderingStatus != OrderingStatus.DETERMINISTIC,
+            expandable = expandable,
+            expanded = expanded,
+            callsInside = childFrame?.events?.size ?: 0,
+            childFrame = childVM,
+        )
+    }
+
+    private fun styleOf(node: FlowNode): CardStyle = when {
+        node.kind == FlowNodeKind.ENTRY -> CardStyle.ENTRY
+        node.kind == FlowNodeKind.CYCLE -> CardStyle.CYCLE
+        node.kind == FlowNodeKind.LIMIT -> CardStyle.LIMIT
+        node.resolutionStatus == ResolutionStatus.UNRESOLVED -> CardStyle.UNRESOLVED
+        node.resolutionStatus == ResolutionStatus.EXTERNAL -> CardStyle.EXTERNAL
+        node.resolutionStatus == ResolutionStatus.BUILT_IN -> CardStyle.BUILT_IN
+        node.dispatchConfidence == DispatchConfidence.AMBIGUOUS -> CardStyle.AMBIGUOUS
+        node.dispatchConfidence == DispatchConfidence.DECLARED_TARGET -> CardStyle.DECLARED_TARGET
+        else -> CardStyle.PROJECT_CALL
+    }
+
+    private fun titleOf(node: FlowNode): String = when (node.kind) {
+        FlowNodeKind.LIMIT -> FlowLensBundle.message("card.limit.node")
+        FlowNodeKind.CYCLE -> FlowLensBundle.message(
+            "card.cycle.label", node.targetSymbol?.displayName ?: "?",
+        )
+        else -> node.targetSymbol?.displayName ?: "?"
+    }
+
+    private fun badgesOf(node: FlowNode, style: CardStyle): List<String> = buildList {
+        when (style) {
+            CardStyle.DECLARED_TARGET -> add(FlowLensBundle.message("card.badge.declared.target"))
+            CardStyle.AMBIGUOUS -> add(FlowLensBundle.message("card.badge.ambiguous"))
+            CardStyle.UNRESOLVED -> add(FlowLensBundle.message("card.badge.unresolved"))
+            CardStyle.EXTERNAL -> add(FlowLensBundle.message("card.badge.external"))
+            CardStyle.BUILT_IN -> add(FlowLensBundle.message("card.badge.built.in"))
+            else -> Unit
+        }
+        if (node.kind == FlowNodeKind.CONSTRUCTOR) {
+            add(FlowLensBundle.message("card.badge.constructor"))
+        }
+        when (node.executionMode) {
+            ExecutionMode.GOROUTINE -> add(FlowLensBundle.message("card.badge.goroutine"))
+            ExecutionMode.DEFERRED -> add(FlowLensBundle.message("card.badge.deferred"))
+            else -> Unit
+        }
+        if (node.metadata[FlowMetadata.LIMIT] == FlowMetadata.LIMIT_DEPTH) {
+            add(FlowLensBundle.message("card.limit.depth"))
+        }
+        if (node.metadata[FlowMetadata.TEST_SOURCE] == "true") {
+            add(FlowLensBundle.message("card.badge.test.source"))
+        }
+    }
+
+    // ---- layout ----
+
+    /** Assigns bounds; returns the frame's occupied rectangle. */
+    private fun layoutFrame(frame: FrameVM, x: Int, y: Int): Rectangle {
+        val pad = CanvasMetrics.FRAME_PADDING
+        var cursorY = y + CanvasMetrics.FRAME_HEADER + pad
+        var maxWidth = CanvasMetrics.CARD_WIDTH
+        val cardX = x + pad
+        frame.cards.forEachIndexed { index, card ->
+            if (index > 0) {
+                cursorY += if (card.boundaryBeforeCard) CanvasMetrics.BOUNDARY_GAP else CanvasMetrics.CONNECTOR_GAP
+            }
+            val cardHeight = CanvasMetrics.CARD_HEIGHT +
+                if (card.badges.isEmpty()) 0 else CanvasMetrics.CARD_BADGE_EXTRA
+            card.bounds = Rectangle(cardX, cursorY, CanvasMetrics.CARD_WIDTH, cardHeight)
+            cursorY += cardHeight
+            card.childFrame?.let { child ->
+                cursorY += CanvasMetrics.CONNECTOR_GAP / 2
+                val childRect = layoutFrame(child, cardX + CanvasMetrics.CHILD_INDENT, cursorY)
+                cursorY = childRect.y + childRect.height
+                maxWidth = maxOf(maxWidth, childRect.x + childRect.width + CanvasMetrics.CHILD_INDENT - x)
+            }
+        }
+        val height = (cursorY - y) + pad
+        frame.bounds = Rectangle(x, y, maxWidth + pad * 2, height)
+        return frame.bounds
+    }
+}

@@ -1,0 +1,8 @@
+<idea-plugin>
+    <!-- Loaded only when the Go plugin is available. Flow Lens core, Java, and Kotlin
+         analysis work without it; Go capability is reported as unavailable. -->
+    <extensions defaultExtensionNs="com.kanicream.flowlens">
+        <flowLanguageAnalyzer
+            implementation="com.kanicream.flowlens.analysis.go.GoFlowAnalyzer"/>
+    </extensions>
+</idea-plugin>
