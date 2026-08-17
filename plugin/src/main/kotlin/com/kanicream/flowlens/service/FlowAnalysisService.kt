@@ -9,6 +9,7 @@ import com.kanicream.flowlens.core.model.FlowLimits
 import com.kanicream.flowlens.core.model.FlowProgress
 import com.kanicream.flowlens.core.model.LocationId
 import com.kanicream.flowlens.core.model.RunId
+import com.kanicream.flowlens.settings.FlowLensSettings
 import com.intellij.psi.PsiElement
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,8 +51,13 @@ class FlowAnalysisService(
     /**
      * Starts a new analysis from the caret position. Safe to call from the EDT: the
      * caller captures only the file and offset; all analysis work is background.
+     *
+     * [limits] is normally omitted so the run snapshots the current project
+     * settings; tests pass an explicit snapshot. Either way the run keeps that
+     * immutable configuration for its whole lifetime (guardrails §8).
      */
-    fun startAnalysis(file: VirtualFile, offset: Int, limits: FlowLimits = FlowLimits()): RunId {
+    fun startAnalysis(file: VirtualFile, offset: Int, limits: FlowLimits? = null): RunId {
+        val effectiveLimits = limits ?: FlowLensSettings.getInstance(project).snapshot()
         val runId = RunId(runCounter.incrementAndGet())
         val handles = RunHandles(project)
         val previous: Job?
@@ -70,7 +76,7 @@ class FlowAnalysisService(
             runId = runId,
             file = file,
             offset = offset,
-            limits = limits,
+            limits = effectiveLimits,
             handles = handles,
             publishResult = ::acceptResult,
             publishProgress = ::acceptProgress,

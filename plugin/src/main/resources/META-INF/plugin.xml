@@ -54,6 +54,10 @@
                     anchor="right"
                     icon="/icons/flowLens.svg"
                     factoryClass="com.kanicream.flowlens.ui.FlowLensToolWindowFactory"/>
+        <projectConfigurable parentId="tools"
+                             id="com.kanicream.flowlens.settings"
+                             displayName="Flow Lens"
+                             instance="com.kanicream.flowlens.settings.FlowLensConfigurable"/>
     </extensions>
 
     <actions>
