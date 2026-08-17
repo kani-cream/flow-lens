@@ -38,11 +38,13 @@ class FlowCanvas : JComponent() {
 
     var onSelectionChanged: (CardVM?) -> Unit = {}
     var onNavigateToTarget: (CardVM) -> Unit = {}
+    var onNavigateToFrameEntry: (FrameVM) -> Unit = {}
 
     private var result: FlowAnalysisResult? = null
     private val expandedNodes = mutableSetOf<NodeId>()
     private var rootVM: FrameVM? = null
     private var visibleCards: List<CardVM> = emptyList()
+    private var visibleFrames: List<FrameVM> = emptyList()
     private var selectedNodeId: NodeId? = null
     private var zoom = 1.0
     private var dragStart: Point? = null
@@ -269,6 +271,11 @@ class FlowCanvas : JComponent() {
                 if (card == null) {
                     dragStart = e.locationOnScreen
                     dragOrigin = visibleRect.location
+                    // Entry/frame headers open the frame's declaration
+                    // (V0.1_SPEC.md section 18: entry opens entry declaration).
+                    if (e.clickCount == 2) {
+                        frameHeaderAt(e.point)?.let(onNavigateToFrameEntry)
+                    }
                 }
                 select(card)
                 if (card != null && e.clickCount == 2) {
@@ -354,15 +361,26 @@ class FlowCanvas : JComponent() {
     }
 
     private fun cardAt(point: Point): CardVM? {
-        val s = totalScale()
-        val logical = Point((point.x / s).roundToInt(), (point.y / s).roundToInt())
+        val logical = toLogical(point)
         // Deepest (nested) card wins, so hit-test in reverse layout order.
         return visibleCards.lastOrNull { it.bounds.contains(logical) }
+    }
+
+    private fun frameHeaderAt(point: Point): FrameVM? {
+        val logical = toLogical(point)
+        // Deepest (nested) frame wins, so hit-test in reverse layout order.
+        return visibleFrames.lastOrNull { it.headerBounds.contains(logical) }
+    }
+
+    private fun toLogical(point: Point): Point {
+        val s = totalScale()
+        return Point((point.x / s).roundToInt(), (point.y / s).roundToInt())
     }
 
     private fun rebuild() {
         rootVM = result?.let { CanvasViewModelBuilder.build(it, expandedNodes) }
         visibleCards = CanvasViewModelBuilder.visibleCards(rootVM)
+        visibleFrames = CanvasViewModelBuilder.visibleFrames(rootVM)
         val selected = selectedNodeId
         if (selected != null && visibleCards.none { it.nodeId == selected }) {
             selectedNodeId = null

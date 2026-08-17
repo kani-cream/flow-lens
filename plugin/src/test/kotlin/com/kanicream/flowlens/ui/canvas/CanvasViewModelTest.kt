@@ -190,6 +190,41 @@ class CanvasViewModelTest : BasePlatformTestCase() {
         assertEquals(cards.map { it.bounds.y }.sorted(), cards.map { it.bounds.y })
     }
 
+    fun `test frames expose entry locations and clickable headers for navigation`() {
+        // Regression (sandbox feedback): double-clicking the root/entry header must
+        // navigate back to the entry declaration (V0.1_SPEC.md section 18).
+        val entry = com.kanicream.flowlens.core.model.FlowLocation(
+            com.kanicream.flowlens.core.model.LocationId(1), "Sample.java", 16,
+        )
+        val childEntry = com.kanicream.flowlens.core.model.FlowLocation(
+            com.kanicream.flowlens.core.model.LocationId(2), "Sample.java", 29,
+        )
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), entry)
+        val call = b.addEvent(root, spec("child"))!!
+        val child = b.openChildFrame(root, call, symbol("child"), childEntry)
+        b.addEvent(child, spec("inner"))
+        val result = b.snapshot(FlowResultStatus.COMPLETED)
+
+        val vm = CanvasViewModelBuilder.build(result, setOf(call))!!
+        val frames = CanvasViewModelBuilder.visibleFrames(vm)
+        assertEquals(2, frames.size)
+        assertEquals(entry, frames[0].entryLocation)
+        assertEquals(childEntry, frames[1].entryLocation)
+        for (frame in frames) {
+            assertEquals(frame.bounds.x, frame.headerBounds.x)
+            assertEquals(frame.bounds.y, frame.headerBounds.y)
+            assertEquals(CanvasMetrics.FRAME_HEADER, frame.headerBounds.height)
+        }
+        // Collapsed view hides the child frame from hit testing.
+        assertEquals(
+            1,
+            CanvasViewModelBuilder.visibleFrames(
+                CanvasViewModelBuilder.build(result, emptySet()),
+            ).size,
+        )
+    }
+
     fun `test selection list excludes cards hidden by collapsed parents`() {
         val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
         val root = b.openRootFrame(symbol("root"), null)

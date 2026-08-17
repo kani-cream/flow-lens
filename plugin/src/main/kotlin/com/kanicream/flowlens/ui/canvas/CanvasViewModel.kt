@@ -51,9 +51,14 @@ class FrameVM(
     val title: String,
     val subtitle: String,
     val isRoot: Boolean,
+    val entryLocation: com.kanicream.flowlens.core.model.FlowLocation?,
     val cards: List<CardVM>,
 ) {
     var bounds: Rectangle = Rectangle()
+
+    /** The clickable header strip; double-click opens the entry declaration. */
+    val headerBounds: Rectangle
+        get() = Rectangle(bounds.x, bounds.y, bounds.width, CanvasMetrics.FRAME_HEADER)
 }
 
 /** Logical (unscaled) layout constants; the canvas applies zoom and UI scale. */
@@ -113,8 +118,20 @@ object CanvasViewModelBuilder {
                 FlowLensBundle.message("card.depth.label", frame.depth),
             ).joinToString(" · "),
             isRoot = isRoot,
+            entryLocation = frame.entryLocation,
             cards = cards,
         )
+    }
+
+    /** All visible frames (root plus expanded child frames), deepest last. */
+    fun visibleFrames(root: FrameVM?): List<FrameVM> {
+        val out = mutableListOf<FrameVM>()
+        fun collect(frame: FrameVM) {
+            out += frame
+            frame.cards.forEach { it.childFrame?.let(::collect) }
+        }
+        root?.let(::collect)
+        return out
     }
 
     private fun cardVM(

@@ -60,6 +60,7 @@ class FlowLensPanel(private val project: Project) : JPanel(BorderLayout()), Disp
 
         canvas.onSelectionChanged = detailsPanel::showSelection
         canvas.onNavigateToTarget = { card -> navigateTo(card.node.preferredNavigationLocation) }
+        canvas.onNavigateToFrameEntry = { frame -> navigateTo(frame.entryLocation) }
         installCollectors()
     }
 
