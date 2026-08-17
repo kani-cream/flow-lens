@@ -71,7 +71,7 @@ internal class FlowAnalysisRun(
             progress(FlowProgressStage.WAITING_FOR_INDEXES)
             val root = smartReadAction(project) { findRoot() }
             if (root == null) {
-                publishProgressTerminal(FlowProgressStage.FAILED)
+                progress(FlowProgressStage.FAILED)
                 publishResult(
                     FlowAnalysisResultEvent(
                         runId,
@@ -170,7 +170,7 @@ internal class FlowAnalysisRun(
                 else -> FlowResultStatus.COMPLETED
             }
             publishResult(FlowAnalysisResultEvent(runId, modelBuilder.snapshot(status)))
-            publishProgressTerminal(
+            progress(
                 when (status) {
                     FlowResultStatus.STALE -> FlowProgressStage.STALE
                     FlowResultStatus.TRUNCATED -> FlowProgressStage.TRUNCATED
@@ -183,7 +183,7 @@ internal class FlowAnalysisRun(
                 builder?.let {
                     publishResult(FlowAnalysisResultEvent(runId, it.snapshot(FlowResultStatus.CANCELLED)))
                 }
-                publishProgressTerminal(FlowProgressStage.CANCELLED)
+                progress(FlowProgressStage.CANCELLED)
             }
             throw e
         } catch (e: ProcessCanceledException) {
@@ -200,7 +200,7 @@ internal class FlowAnalysisRun(
                 )
                 publishResult(FlowAnalysisResultEvent(runId, it.snapshot(FlowResultStatus.FAILED)))
             }
-            publishProgressTerminal(FlowProgressStage.FAILED)
+            progress(FlowProgressStage.FAILED)
         }
     }
 
@@ -371,10 +371,6 @@ internal class FlowAnalysisRun(
         )
 
     private fun progress(stage: FlowProgressStage) {
-        publishProgress(buildProgress(stage))
-    }
-
-    private fun publishProgressTerminal(stage: FlowProgressStage) {
         publishProgress(buildProgress(stage))
     }
 

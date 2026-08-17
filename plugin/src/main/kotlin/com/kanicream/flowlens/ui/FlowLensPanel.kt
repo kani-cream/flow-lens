@@ -21,7 +21,6 @@ import com.kanicream.flowlens.core.model.FlowProgress
 import com.kanicream.flowlens.core.model.FlowAnalysisResult
 import com.kanicream.flowlens.core.model.RunId
 import com.kanicream.flowlens.service.FlowAnalysisService
-import com.kanicream.flowlens.ui.canvas.CardVM
 import com.kanicream.flowlens.ui.canvas.FlowCanvas
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -42,8 +41,8 @@ class FlowLensPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         border = JBUI.Borders.empty(4, 10)
     }
     private val detailsPanel = FlowDetailsPanel(
-        onOpenTarget = { card -> navigateTo(card, card.node.targetLocation ?: card.node.callSiteLocation) },
-        onOpenCallSite = { card -> navigateTo(card, card.node.callSiteLocation) },
+        onOpenTarget = { card -> navigateTo(card.node.targetLocation ?: card.node.callSiteLocation) },
+        onOpenCallSite = { card -> navigateTo(card.node.callSiteLocation) },
     )
     private val jobs = mutableListOf<Job>()
     private var currentRunId: RunId? = null
@@ -61,7 +60,7 @@ class FlowLensPanel(private val project: Project) : JPanel(BorderLayout()), Disp
 
         canvas.onSelectionChanged = detailsPanel::showSelection
         canvas.onNavigateToTarget = { card ->
-            navigateTo(card, card.node.targetLocation ?: card.node.callSiteLocation)
+            navigateTo(card.node.targetLocation ?: card.node.callSiteLocation)
         }
         installCollectors()
     }
@@ -110,16 +109,13 @@ class FlowLensPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         statusLabel.text = "$stageText  ·  $counters$simplified"
     }
 
-    private fun navigateTo(card: CardVM, location: FlowLocation?) {
+    private fun navigateTo(location: FlowLocation?) {
         if (location == null) return
         val runId = currentRunId ?: return
         val pointer = service.navigationPointer(runId, location.handle) ?: return
         val element = pointer.element ?: return
         val file = element.containingFile?.virtualFile ?: return
         OpenFileDescriptor(project, file, element.textOffset).navigate(true)
-        // Suppress unused warning: card retained for future context-aware focus rules.
-        @Suppress("UNUSED_EXPRESSION")
-        card
     }
 
     override fun dispose() {
