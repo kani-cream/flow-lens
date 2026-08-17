@@ -75,6 +75,9 @@ tasks.test {
         "flowlens.classes.dir",
         layout.buildDirectory.dir("classes/kotlin/main").get().asFile.absolutePath,
     )
+    // For RealSourceSmokeTest: this repository's own sources are the dogfooding
+    // corpus, so the smoke test analyzes real code shapes rather than fixtures.
+    systemProperty("flowlens.repoRoot", rootProject.projectDir.absolutePath)
 }
 
 intellijPlatform {

@@ -5,6 +5,7 @@ import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.kanicream.flowlens.FlowLensBundle
+import com.kanicream.flowlens.analysis.FlowAnalyzerCapabilities
 import com.kanicream.flowlens.core.model.FlowAnalysisResult
 import com.kanicream.flowlens.core.model.NodeId
 import java.awt.BasicStroke
@@ -131,12 +132,35 @@ class FlowCanvas : JComponent() {
 
     // ---- painting ----
 
+    /**
+     * Empty state: how to start, plus which language integrations are usable.
+     * An unavailable integration is shown with its reason instead of silently
+     * producing nothing when the user tries that language (guardrails §3.1).
+     */
     private fun paintEmptyHint(g2: Graphics2D) {
-        g2.color = JBColor.GRAY
         g2.font = JBUI.Fonts.label()
-        val hint = FlowLensBundle.message("toolwindow.empty.hint")
         val fm = g2.fontMetrics
-        g2.drawString(hint, max(12, (width - fm.stringWidth(hint)) / 2), height / 2)
+        val hint = FlowLensBundle.message("toolwindow.empty.hint")
+        var y = height / 2 - fm.height
+        g2.color = Palette.mutedText
+        g2.drawString(hint, max(12, (width - fm.stringWidth(hint)) / 2), y)
+
+        g2.font = JBUI.Fonts.smallFont()
+        val small = g2.fontMetrics
+        for (capability in FlowAnalyzerCapabilities.current()) {
+            y += small.height + 4
+            val text = if (capability.available) {
+                "✓  ${capability.displayName}"
+            } else {
+                "—  ${FlowLensBundle.message(
+                    "capability.unavailable",
+                    capability.displayName,
+                    capability.requirement,
+                )}"
+            }
+            g2.color = if (capability.available) Palette.text else Palette.mutedText
+            g2.drawString(text, max(12, (width - small.stringWidth(text)) / 2), y)
+        }
     }
 
     private fun paintFrame(g2: Graphics2D, frame: FrameVM) {
