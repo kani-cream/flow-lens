@@ -44,7 +44,9 @@ object FlowStatusModel {
             )
         }
         val stage = progress?.stage ?: stageOf(result!!.status)
-        val running = progress?.isTerminal == false && result?.isTerminal != true
+        // Either signal reaching a terminal state ends the run; if only one of them
+        // has been observed yet, that one decides.
+        val running = !(progress?.isTerminal ?: false) && !(result?.isTerminal ?: false)
         return FlowStatusViewState(
             headline = FlowLensBundle.message("status.stage.${stage.name}"),
             counters = progress?.let {

@@ -177,8 +177,11 @@ object CanvasViewModelBuilder {
             expandable = expandable,
             expanded = expanded,
             // The target frame exists but has not been analyzed yet: a transient
-            // UI-only state that never counts against the node budget.
-            resolving = childFrame != null && !childFrame.bodyComplete,
+            // UI-only state that never counts against the node budget. Once the run
+            // is terminal nothing is being resolved any more, so a frame left
+            // unanalyzed by cancellation or truncation must not keep claiming
+            // progress (REPO_LENS_LESSONS.md 3.6).
+            resolving = childFrame != null && !childFrame.bodyComplete && !result.isTerminal,
             depthLimited = node.metadata[FlowMetadata.LIMIT] == FlowMetadata.LIMIT_DEPTH,
             callsInside = childFrame?.events?.size ?: 0,
             childFrame = childVM,

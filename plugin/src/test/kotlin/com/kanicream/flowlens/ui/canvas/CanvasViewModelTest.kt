@@ -225,6 +225,32 @@ class CanvasViewModelTest : BasePlatformTestCase() {
         assertEquals(1, afterAnalysis.callsInside)
     }
 
+    fun `test a terminated run stops claiming that frames are still resolving`() {
+        // Regression: a run cancelled or truncated while child frames were queued
+        // left those cards showing a resolving indicator forever, so a stopped
+        // analysis looked like it was still working.
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), null)
+        val call = b.addEvent(root, spec("child"))!!
+        b.openChildFrame(root, call, symbol("child"), null)
+
+        val whileRunning = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.RUNNING), emptySet())!!.cards.single()
+        assertTrue(whileRunning.resolving)
+
+        for (terminal in listOf(
+            FlowResultStatus.CANCELLED,
+            FlowResultStatus.TRUNCATED,
+            FlowResultStatus.STALE,
+            FlowResultStatus.FAILED,
+            FlowResultStatus.COMPLETED,
+        )) {
+            val card = CanvasViewModelBuilder
+                .build(b.snapshot(terminal), emptySet())!!.cards.single()
+            assertFalse("still resolving after $terminal", card.resolving)
+        }
+    }
+
     fun `test depth limited calls reserve space for an explicit continuation marker`() {
         val limited = FlowEventSpec(
             kind = FlowNodeKind.CALL,

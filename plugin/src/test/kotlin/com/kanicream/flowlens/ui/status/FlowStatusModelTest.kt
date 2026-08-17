@@ -127,6 +127,20 @@ class FlowStatusModelTest : BasePlatformTestCase() {
         assertFalse("must not leak the raw bundle key", state.diagnostics.single().startsWith("flow.error"))
     }
 
+    fun `test either signal reaching a terminal state ends the run`() {
+        // Whichever of the two arrives first must disable Stop; neither may keep
+        // the run looking active on its own.
+        val progressOnly = FlowStatusModel.stateOf(progress(FlowProgressStage.CANCELLED), null)
+        assertFalse(progressOnly.stopEnabled)
+        val resultOnly = FlowStatusModel.stateOf(null, result(FlowResultStatus.CANCELLED))
+        assertFalse(resultOnly.stopEnabled)
+        val stillRunning = FlowStatusModel.stateOf(
+            progress(FlowProgressStage.RESOLVING_ROOT_CALLS),
+            result(FlowResultStatus.RUNNING),
+        )
+        assertTrue(stillRunning.stopEnabled)
+    }
+
     fun `test terminal result without progress still renders its state`() {
         val state = FlowStatusModel.stateOf(null, result(FlowResultStatus.STALE))
         assertEquals(StatusTone.WARNING, state.tone)
