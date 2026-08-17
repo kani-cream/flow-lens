@@ -2,53 +2,45 @@
 
 ## 1. Purpose
 
-Flow Lens is not intended to look like a conventional call graph with identical rectangles connected by arrows.
+Flow Lens must not look like a conventional call graph made of identical rectangles joined by arrows.
 
-The visualization must communicate **code meaning**, **analysis state**, and **uncertainty** through a consistent visual language.
+The visualization communicates **code meaning**, **analysis state**, **dispatch confidence**, **execution mode**, and **uncertainty** through a consistent visual language.
 
-The user should feel that they are exploring how a piece of code unfolds, not inspecting a generic graph database.
-
-This document defines that visual language.
+The user should feel that code is unfolding into an explorable map, not that they are inspecting a generic graph database.
 
 ---
 
 ## 2. Visual Principles
 
-### 2.1 Semantic before decorative
+### Semantic before decorative
 
-Every major visual distinction should answer a code-understanding question.
+Every meaningful visual distinction should answer a code-understanding question:
 
-Examples:
+- Where did analysis start?
+- Is this inside the project?
+- Is this target exact, only the declared implementation, ambiguous, or unresolved?
+- Is execution synchronous, goroutine/async, or deferred?
+- Is ordering certain?
+- Is this method body currently expanded?
+- Did analysis stop because of a limit, cancellation, indexing, or stale source?
 
-- Is this the entry point?
-- Is this call inside or outside the project?
-- Did the flow split?
-- Is the order certain?
-- Is this async?
-- Is the target unresolved or merely ambiguous?
-- Did analysis stop because of a configured limit?
+Animation without semantic value should be minimized.
 
-Animation that communicates none of these should be minimized.
+### Explorable, not exhaustive
 
-### 2.2 A flow should feel explorable
+The canvas presents a comprehensible overview first. Deeper callable bodies are revealed progressively.
 
-The user should be able to start with a readable overview and progressively open deeper method/function internals without losing context.
+### Do not encode state with color alone
 
-### 2.3 Do not encode everything with color
+Use shape, iconography, border treatment, labels, connectors, grouping, and position. Color only reinforces meaning.
 
-Color may reinforce meaning, but shape, iconography, border treatment, labels, position, and connector style must also communicate state so the map remains understandable across themes and accessibility settings.
+### IntelliJ-native
 
-### 2.4 Respect IntelliJ themes
+Respect IntelliJ IDEA Ultimate light/dark themes, UI scaling, keyboard navigation, focus conventions, and accessibility behavior.
 
-Flow Lens must feel integrated with IntelliJ rather than looking like an embedded web page from an unrelated product.
+### Stable orientation
 
-Use theme-aware IDE colors/tokens wherever practical.
-
-### 2.5 Preserve orientation
-
-The default reading direction is **top to bottom**.
-
-Automatic layout should avoid unnecessary left/right flipping during progressive updates. New analysis results should extend or gently reflow the existing map rather than making the user's mental model jump around.
+Default reading direction is top-to-bottom. Progressive analysis should not repeatedly flip branches or cause large map jumps.
 
 ---
 
@@ -57,57 +49,84 @@ Automatic layout should avoid unnecessary left/right flipping during progressive
 Conceptual Tool Window:
 
 ```text
-┌───────────────────────────────────────────────────────────┐
-│ FLOW LENS                                  Fit  −  100% + │
-├───────────────────────────────────────────────────────────┤
-│ Current: PaymentController.purchase()     Depth 3 · 26    │
-├───────────────────────────────────────────────────────────┤
-│                                                           │
-│                 FLOW CANVAS                               │
-│                                                           │
-│                        ENTRY                              │
-│                          │                                │
-│                          ▼                                │
-│                       CALL                                │
-│                          │                                │
-│                          ▼                                │
-│                       ...                                 │
-│                                                           │
-├───────────────────────────────────────────────────────────┤
-│ Selected node details / status                            │
-└───────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│ FLOW LENS                                   Fit  − 100%  + │
+├────────────────────────────────────────────────────────────┤
+│ PaymentController.purchase()        D3 · 26 nodes · LIVE   │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│                        FLOW CANVAS                         │
+│                                                            │
+│                         ENTRY                              │
+│                           │                                │
+│                           ▼                                │
+│                       CALL CARDS                           │
+│                                                            │
+├────────────────────────────────────────────────────────────┤
+│ Selected node details / diagnostics / actions             │
+└────────────────────────────────────────────────────────────┘
 ```
 
-The canvas is the dominant surface. Sidebars or details must not reduce it to a narrow tree view.
+The canvas is the dominant surface. Details should not reduce it to a narrow tree-like column.
 
 ---
 
-## 4. Entry Point
+## 4. Initial Expansion Policy
 
-The entry point must be visually stronger than ordinary calls.
+Initial presentation must avoid showing the complete recursive result as one giant map.
+
+Default:
+
+```text
+Root FlowFrame            EXPANDED
+Direct root calls         VISIBLE
+Child target FlowFrames   COLLAPSED
+Depth 2+                  COLLAPSED
+```
 
 Concept:
 
 ```text
+╭────────────────────────────────────────╮
+│ ▶ PurchaseController.purchase()        │
+│ ENTRY · Java · D0                      │
+╰────────────────────────────────────────╯
+                    │
+        ┌───────────┼───────────┐
+        ▼           ▼           ▼
+   validate()    charge()     save()
+                  [5 calls]
+```
+
+Expanding `charge()` opens its analyzed `targetFrame` inline.
+
+This policy is mandatory for v0.1 so that a 100-node analysis does not become a 100-node wall.
+
+---
+
+## 5. Entry Point
+
+The root is stronger than ordinary calls.
+
+```text
 ╭────────────────────────────────────────────╮
 │ ▶ PaymentController.purchase              │
-│   ENTRY · Java · depth 0                   │
+│ ENTRY · Java · depth 0                     │
 ╰────────────────────────────────────────────╯
 ```
 
 Requirements:
 
-- Larger or more prominent than normal call cards.
-- Clearly labeled as the starting point.
-- Shows containing type/package context when useful.
-- Can be double-clicked to navigate to source.
-- Acts as the visual root of the current map.
+- visually prominent.
+- clearly identified as root.
+- language/context available without excessive detail.
+- double click / Enter opens entry declaration.
 
 ---
 
-## 5. Method / Function Call Card
+## 6. Method / Function Call Card
 
-Default collapsed card:
+Collapsed project call:
 
 ```text
 ╭──────────────────────────────╮
@@ -116,39 +135,39 @@ Default collapsed card:
 ╰──────────────────────────────╯
 ```
 
-The card should prioritize:
+Priorities:
 
-1. Callable name.
-2. Containing type/package context.
-3. Small state/depth metadata.
+1. callable name.
+2. containing type/package context.
+3. compact depth/state indicator.
 
-Do not permanently fill every card with file paths, signatures, line numbers, counts, and badges. That creates visual noise.
+Avoid permanent file paths, full signatures, line numbers, and many badges on every card.
 
-Full details belong in selected state or a details area.
-
-Selected concept:
+Selected state may reveal:
 
 ```text
 ╭──────────────────────────────────────────────╮
 │ ⚡ charge(user, order)                       │
 │ PaymentService                               │
+│ PROJECT · D1 · DECLARED TARGET               │
+│ 4 calls available inside                     │
 │                                              │
-│ PROJECT · depth 2 · 4 calls inside           │
-│ PaymentService.java:84                       │
+│ Open Target · Open Call Site · Expand        │
 ╰──────────────────────────────────────────────╯
 ```
 
 ---
 
-## 6. Nested Expansion — "Enter the Method"
+## 7. Nested Expansion — Enter the Method
 
-A core Flow Lens interaction is opening a call without navigating away from the map.
+A call card can reveal its analyzed child `FlowFrame` without leaving the map.
 
 Collapsed:
 
 ```text
 ╭────────────────────────────╮
 │ PaymentService.execute()   │
+│ 3 calls inside             │
 ╰────────────────────────────╯
 ```
 
@@ -169,50 +188,35 @@ Expanded:
 ╰──────────────────────────────────────────────────╯
 ```
 
-Deeper nested expansion:
-
-```text
-╭──────────────────────────────────────────────────────────╮
-│ PaymentService.execute()                                 │
-│                                                          │
-│ gateway.charge()                                         │
-│ ╭──────────────────────────────────────────────────────╮ │
-│ │ buildRequest()                                       │ │
-│ │      │                                               │ │
-│ │      ▼                                               │ │
-│ │ HttpClient.post()                                    │ │
-│ │      │                                               │ │
-│ │      ▼                                               │ │
-│ │ EXTERNAL · okhttp                                    │ │
-│ ╰──────────────────────────────────────────────────────╯ │
-╰──────────────────────────────────────────────────────────╯
-```
-
-The effect should feel like revealing implementation depth, not opening unrelated floating windows.
-
 Requirements:
 
-- Expansion/collapse should retain the parent context.
-- Layout change should be predictable.
-- Deep expansion must eventually use progressive disclosure rather than allowing infinitely huge nested cards.
-- User can choose `Analyze from Here` to make any supported node the new root if the current map becomes too deep.
+- retain parent context.
+- predictable re-layout.
+- expansion should grow from the selected card.
+- deep content remains progressively collapsible.
+- `Analyze from Here` can promote a selected callable to the new root.
 
 ---
 
-## 7. Connectors
+## 8. Connectors and Ordering
 
-Connectors communicate more than adjacency.
-
-### Normal synchronous flow
+### Deterministic synchronous flow
 
 ```text
 │
 ▼
 ```
 
-### Return/reference back to existing path
+### Approximate ordering
 
-Use a visually distinct return/back-reference treatment rather than duplicating large subtrees when that would reduce clarity.
+Use a visually weaker/different connector or group treatment.
+
+```text
+┊
+▽
+```
+
+Exact styling is implementation-defined, but the ordinary solid sequential connector must not imply certainty when `orderingStatus != DETERMINISTIC`.
 
 ### Cycle
 
@@ -225,17 +229,158 @@ B()
  ╰──────── ↩ cycle to A()
 ```
 
-### Approximate/unspecified ordering
-
-When ordering is not fully known, connector or group styling should communicate that the layout is a visualization choice rather than a guaranteed execution sequence.
-
-Never use an ordinary solid sequential connector to imply certainty that the analyzer does not have.
+A cycle is a back-reference, not another recursively duplicated body.
 
 ---
 
-## 8. Conditions and Branches
+## 9. Dispatch Confidence
 
-Full branch visualization begins in v0.2, but its visual grammar is defined now.
+Dispatch confidence is separate from resolution location.
+
+### EXACT
+
+Normal project-call treatment. No warning required.
+
+### DECLARED_TARGET
+
+A concrete declaration body is being followed, but runtime override may select another implementation.
+
+Concept:
+
+```text
+╭──────────────────────────────╮
+│ ⚡ execute()                 │
+│ PaymentService               │
+│ ◇ declared target            │
+╰──────────────────────────────╯
+```
+
+Requirements:
+
+- not styled as an error.
+- visually distinct enough that users do not mistake it for guaranteed dispatch.
+- details explain `Runtime override may differ`.
+- child frame may still be expanded.
+
+### AMBIGUOUS
+
+No responsible single continuation is selected.
+
+```text
+╭──────────────────────────────╮
+│ ◇ paymentGateway.charge()   │
+│ AMBIGUOUS TARGET             │
+╰──────────────────────────────╯
+```
+
+v0.1 stops here.
+
+Future candidate exploration:
+
+```text
+               ◇ 3 POSSIBLE TARGETS
+                  ╱      │      ╲
+                 ╱       │       ╲
+             Stripe    PayPay     Mock
+```
+
+---
+
+## 10. Unresolved Target
+
+```text
+╭──────────────────────────────╮
+│ ? dynamicCall()             │
+│ UNRESOLVED                   │
+╰──────────────────────────────╯
+       ⋯
+```
+
+The connector ends visibly.
+
+Default navigation opens the call site because there is no known target declaration.
+
+---
+
+## 11. External Project Boundary
+
+External code must feel like crossing out of project-owned source.
+
+The boundary is **local to a call edge**, not necessarily one canvas-wide horizontal line.
+
+Preferred concept:
+
+```text
+╭──────────────────────────────╮
+│ HttpClient.post()            │
+│ project code                 │
+╰──────────────────────────────╯
+              │
+              ║ PROJECT BOUNDARY
+              ▼
+╭──────────────────────────────╮
+│ okhttp3.Call.execute()       │
+│ EXTERNAL                     │
+╰──────────────────────────────╯
+```
+
+This model works inside nested frames and multiple unrelated external branches.
+
+Requirements:
+
+- boundary is more meaningful than just a card color.
+- recursion stops by default.
+- external source navigation may still work where IntelliJ can navigate.
+
+---
+
+## 12. Execution Mode
+
+Execution mode must not be lost in the visual layer.
+
+### SYNC
+
+Normal connector.
+
+### GOROUTINE / ASYNC
+
+At minimum in v0.1, show a semantic badge/connector distinction when known.
+
+Go concept:
+
+```text
+main flow
+   │
+   ├──────── ⚡ goroutine ────────► notify()
+   │
+   ▼
+save()
+```
+
+A full parallel lane may come later.
+
+### DEFERRED
+
+Go `defer` must not look like immediate synchronous continuation.
+
+```text
+╭──────────────────────────────╮
+│ ↩ cleanup()                 │
+│ DEFERRED                     │
+╰──────────────────────────────╯
+```
+
+The visual grammar should communicate "scheduled for later execution", without pretending Flow Lens has fully modeled the runtime defer stack in v0.1.
+
+### UNKNOWN
+
+Do not invent async/sync semantics beyond what the analyzer knows.
+
+---
+
+## 13. Conditions and Branches
+
+Full branch visualization begins in v0.2.
 
 Concept:
 
@@ -244,46 +389,38 @@ Concept:
                      ▼
           ◆ payment.isRequired() ?
               ╱                 ╲
-             ╱                   ╲
         REQUIRED                SKIP
            │                      │
            ▼                      ▼
-   ╭──────────────╮       ╭──────────────╮
-   │ charge()     │       │ skip()       │
-   ╰──────────────╯       ╰──────────────╯
+       charge()                 skip()
            │                      │
            ╰──────────┬───────────╯
                       ▼
-               ╭────────────╮
-               │ save()     │
-               ╰────────────╯
+                    save()
 ```
 
 Requirements:
 
-- Condition is not rendered as an ordinary call card.
-- Branch labels are visible near the split.
-- Reconvergence is visible when statically meaningful.
-- Branch widths should be balanced where practical.
-- Long condition expressions should be summarized with full source available in details/tooltip.
+- condition uses a different semantic shape than a call.
+- branch labels visible.
+- reconvergence visible when statically meaningful.
+- long conditions summarized; source available in details.
 
 ### v0.1 fallback
 
-When v0.1 encounters control flow it does not structurally model, the canvas must show a clear compact status:
+When v0.1 encounters unsupported structural control flow:
 
 ```text
 ⚠ Control flow simplified
 ```
 
-Calls must not be visually presented as a proven unconditional runtime path without this disclosure.
+The map must not present flattened branch calls as a proven unconditional sequence.
 
 ---
 
-## 9. Loops
+## 14. Loops
 
-Loops should be containers, not endless repeated call chains.
-
-Concept:
+v0.2 grammar:
 
 ```text
 ╭────────────────────────────────────────╮
@@ -296,345 +433,244 @@ Concept:
 │         │                              │
 │         ╰──────────── ↻ next           │
 ╰────────────────────────────────────────╯
-                    │
-                    ▼
-               after loop
 ```
 
-Requirements:
-
-- Loop boundary is visually explicit.
-- Iteration is represented symbolically rather than duplicating the body.
-- Calls inside the body can still be expanded.
+Loops are containers, not repeated duplicated chains.
 
 ---
 
-## 10. Async and Parallel Work
+## 15. Limits
 
-Async work must never look like an ordinary synchronous continuation when Flow Lens knows it is async.
-
-Concept:
-
-```text
-                         │
-                ┌────────┴─────────┐
-                │                  │
-                ▼                  ▼
-            main flow          async lane
-                │                  ⋮
-                │          ╭──────────────────╮
-                │          │ sendNotification │
-                │          ╰──────────────────╯
-                │
-                ▼
-            saveOrder()
-```
-
-Future language-specific examples:
-
-- Java: executor/future boundary.
-- Kotlin: coroutine `launch` / `async` boundary.
-- Go: `go f()` goroutine boundary.
-
-For Go v0.1, a call launched by `go` should at minimum retain an async/goroutine marker even if a full lane is deferred.
-
----
-
-## 11. Ambiguous Target
-
-Ambiguity is a valid analysis result, not a failure.
-
-Collapsed v0.1 concept:
-
-```text
-╭──────────────────────────────╮
-│ ◇ paymentGateway.charge()   │
-│ AMBIGUOUS TARGET             │
-╰──────────────────────────────╯
-```
-
-Future candidate view:
-
-```text
-               ◇ 3 POSSIBLE TARGETS
-                  ╱      │      ╲
-                 ╱       │       ╲
-        StripeGateway  PayPayGateway  MockGateway
-              ○              ○             ○
-```
-
-Requirements:
-
-- Do not style it like a fatal error.
-- Communicate possibility/fan-out.
-- Do not automatically present one candidate as definitive.
-
----
-
-## 12. Unresolved Target
-
-Concept:
-
-```text
-╭──────────────────────────────╮
-│ ? dynamicCall()             │
-│ UNRESOLVED                   │
-╰──────────────────────────────╯
-       ⋯
-```
-
-The connector visually ends rather than implying a known continuation.
-
-The call-site itself remains navigable.
-
----
-
-## 13. External Project Boundary
-
-External code should feel like crossing the edge of the project.
-
-Concept:
-
-```text
-╭──────────────────────────────╮
-│ HttpClient.post()            │
-│ project code                 │
-╰──────────────────────────────╯
-              │
-              ▼
-
-┄┄┄┄┄┄┄┄┄ PROJECT BOUNDARY ┄┄┄┄┄┄┄┄┄
-
-              │
-              ▼
-╭──────────────────────────────╮
-│ okhttp3.Call.execute()       │
-│ EXTERNAL                     │
-╰──────────────────────────────╯
-```
-
-Requirements:
-
-- Boundary is more important than merely using a different card color.
-- External nodes are terminal by default.
-- External source navigation may be allowed when the IDE can navigate there, but recursion remains disabled unless explicitly enabled in a later feature.
-
----
-
-## 14. Depth
-
-Depth should be understandable without turning the canvas into a numeric tree dump.
-
-Cards may show a small `D0`, `D1`, `D2` marker.
-
-Optional navigator concept:
-
-```text
-DEPTH
-● 0  Entry
-● 1  Calls
-● 2  Expanded
-● 3  Expanded
-○ 4  Hidden
-```
-
-Depth is method/function recursion depth, not visual nesting count.
-
-Deeper content may become more compact, but readability must remain more important than squeezing everything onto one screen.
-
----
-
-## 15. Limit Reached
-
-Do not silently end a connector.
-
-Concept:
+Depth limit:
 
 ```text
 ╭──────────────────────────────╮
 │ … depth limit reached       │
-│ Expand with higher limit     │
+│ Increase depth to continue   │
 ╰──────────────────────────────╯
 ```
 
-Node-limit concept:
+Node limit:
 
 ```text
 ╭──────────────────────────────╮
 │ … node limit reached        │
-│ Showing first 100 nodes      │
+│ Showing up to 100 nodes      │
 ╰──────────────────────────────╯
 ```
 
-The visual should suggest that more code exists without pretending it was analyzed.
+Never silently end a connector where more code exists but was not analyzed.
 
 ---
 
-## 16. Analysis in Progress
+## 16. Analysis Progress and Lifecycle
 
-Analysis progress should be visible directly on the map.
-
-Initial:
-
-```text
-╭──────────────────────────────╮
-│ ▶ purchase()                │
-╰──────────────────────────────╯
-             │
-             ◌ resolving…
-```
-
-Later:
+### Resolving
 
 ```text
 purchase()
     │
-    ▼
-validate()
-    │
-    ▼
-PaymentService.execute()
-    │
     ◌ resolving…
 ```
 
-Status counters:
+Counters may show:
 
 ```text
 26 nodes · 12 project · 3 external · 1 ambiguous
 ```
 
-Requirements:
+### Waiting for indexes
 
-- Newly resolved content appears progressively.
-- Existing nodes should not jump unnecessarily.
-- Progress state is cancellable.
-- Cancelled maps remain visible with a partial-result indicator.
+```text
+◌ Waiting for IntelliJ indexes…
+```
 
----
+This must not appear as unresolved code.
 
-## 17. Motion
+### Cancelled
 
-Motion should help the user understand what changed.
+Keep the partial map visible with a clear result-level indicator.
 
-Good uses:
+### Stale
 
-- New node gently appearing from its parent connector.
-- Expanded method container growing from the selected card.
-- Branches separating when a condition is resolved.
-- Viewport easing just enough to keep newly expanded content visible.
+When relevant source changed during analysis:
 
-Avoid:
+```text
+⚠ Source changed · Re-analyze
+```
 
-- Constant pulsing after analysis is complete.
-- Decorative particles.
-- Large automatic zoom changes.
-- Re-layout animations that make the entire map drift on every inserted node.
-- Motion that slows navigation.
+Do not keep presenting the result as current.
 
-Respect reduced-motion/accessibility preferences when available.
+### Failed
+
+A concise result-level failure may be shown while retaining safe partial content.
 
 ---
 
-## 18. Selection and Focus
+## 17. Progressive Layout
 
-Selection should make one path easier to follow.
+User-visible progression is local-first.
+
+Preferred sequence:
+
+```text
+1. Root frame appears.
+2. Root direct calls appear.
+3. Root-level picture stabilizes.
+4. Child frames become available for expansion.
+5. Deeper analysis continues within limits.
+```
+
+Avoid deeply growing the first child while later root calls are still missing.
+
+Existing node positions should remain as stable as practical when new content arrives.
+
+---
+
+## 18. Selection, Details, and Navigation
 
 When a node is selected:
 
-- Emphasize the node.
-- Emphasize the path from root to that node where practical.
-- De-emphasize unrelated branches slightly without making them disappear.
-- Show full source/signature/location details outside the normal compact card.
+- emphasize it.
+- emphasize root-to-node context where practical.
+- slightly de-emphasize unrelated branches without hiding them.
+- show full signature/location/status in details.
 
-Keyboard navigation must be possible for core interactions.
+Source actions:
+
+```text
+Open Target
+Open Call Site
+Expand / Collapse
+Analyze from Here
+```
+
+Default:
+
+- resolved call double click / Enter → target declaration.
+- unresolved call double click / Enter → call site.
+- entry → entry declaration.
+
+Keyboard navigation must support core actions.
 
 ---
 
-## 19. Zoom, Pan, and Fit
+## 19. Motion
 
-The canvas must support large-enough flows without becoming unusable.
+Good motion:
 
-Required or strongly preferred:
+- new node gently emerging from a parent connector.
+- child frame expanding from its call card.
+- branch separation when structural control flow becomes available.
+- small viewport easing to keep new content visible.
 
-- Scroll/pan.
-- Zoom in/out.
-- Fit current flow to viewport.
-- Center selected node.
-- Restore a readable zoom when starting a new analysis.
+Avoid:
 
-Avoid forcing the user to precisely drag tiny scrollbars through a large flow.
+- constant pulsing after completion.
+- decorative particles.
+- full-map drift on each new node.
+- large automatic zoom changes.
+- motion that delays navigation.
+
+Respect reduced-motion settings where available.
 
 ---
 
-## 20. Theme and Accessibility
+## 20. Zoom, Pan, and Fit
+
+Required/strongly preferred:
+
+- scroll/pan.
+- zoom in/out.
+- fit current visible flow.
+- center selected node.
+- sane zoom reset for new root analysis.
+
+The user should not need to drag tiny scrollbars across a huge canvas.
+
+---
+
+## 21. Theme and Accessibility
 
 Requirements:
 
-- Light and dark IntelliJ themes.
-- State is not encoded with color alone.
-- Adequate contrast for text and connectors.
-- Icons/shapes remain understandable under common color-vision deficiencies.
-- Text scales consistently with IntelliJ UI settings where feasible.
-- Reduced-motion preference is respected where the platform exposes it.
+- IntelliJ light/dark themes.
+- semantic state not encoded by color alone.
+- adequate text/connector contrast.
+- usable under common color-vision deficiencies.
+- text follows IDE UI scaling where practical.
+- keyboard focus visible.
+- reduced motion honored where exposed by the platform.
 
 ---
 
-## 21. Visual State Matrix
+## 22. Visual State Matrix
 
-| Semantic state | Primary visual treatment | Connector behavior | v0.1 |
-|---|---|---|---|
-| Entry | Prominent root card | Starts main path | Required |
-| Project call | Compact callable card | Normal flow | Required |
-| Constructor/function variant | Callable card + semantic icon/label | Normal flow | Required |
-| Selected | Expanded emphasis/details | Highlight path | Required |
-| Resolving | Temporary progress endpoint | In-progress connector | Required |
-| External | Beyond project boundary | Stops by default | Required |
-| Unresolved | Unknown/broken endpoint | Stops | Required |
-| Ambiguous | Possibility/fan-out treatment | Stops in v0.1 | Required |
-| Cycle | Back-reference marker | Points to prior path | Required |
-| Depth/node limit | Continuation/truncation marker | Stops | Required |
-| Simplified control flow | Warning/status treatment | Conservative layout | Required |
-| Condition | Diamond/split | Multiple branches | v0.2 |
-| Branch merge | Merge junction | Reconverges | v0.2 |
-| Loop | Container + iteration marker | Back edge | v0.2 |
-| Async | Parallel lane/fork | Async edge | Later / metadata in v0.1 |
+| Semantic state | Primary treatment | v0.1 |
+|---|---|---|
+| Entry | Prominent root card | Required |
+| Project call / EXACT | Compact callable card | Required |
+| Project call / DECLARED_TARGET | Callable card + uncertainty marker | Required |
+| Ambiguous | Possibility endpoint | Required |
+| Unresolved | Unknown/broken endpoint | Required |
+| External | Local project-boundary crossing | Required |
+| Built-in | Compact terminal operation | Optional/Supported |
+| Constructor | Callable card + constructor semantics | Required |
+| Child FlowFrame | Inline expandable container | Required |
+| Resolving | Temporary progress endpoint | Required |
+| Waiting for indexes | Result-level waiting state | Required |
+| Cancelled | Partial-result status | Required |
+| Stale | Re-analysis status | Required |
+| Cycle | Back-reference | Required |
+| Limit | Explicit continuation/truncation marker | Required |
+| GOROUTINE | Async/goroutine semantic marker | Required metadata + minimal visual |
+| DEFERRED | Deferred semantic marker | Required metadata + minimal visual |
+| Simplified control flow | Warning/status treatment | Required |
+| Condition / branch | Split grammar | v0.2 |
+| Loop | Container + back-edge | v0.2 |
+| Full async lane | Parallel lane | Later |
 
 ---
 
-## 22. v0.1 Visual Acceptance Criteria
+## 23. v0.1 Visual Acceptance Criteria
 
 v0.1 visual implementation is acceptable only if:
 
-1. It does not look or behave like a plain call-tree widget.
-2. Entry, project call, external, unresolved, ambiguous, cycle, limit, and resolving states are visually distinguishable without relying only on color.
-3. The map grows progressively during analysis.
-4. Existing content remains reasonably stable as new nodes arrive.
-5. A selected node can reveal additional detail without making all nodes permanently verbose.
-6. The user can navigate from the map back to source.
-7. Large-enough flows can be scrolled/panned and fitted to the viewport.
-8. Unsupported v0.1 control-flow semantics are explicitly disclosed instead of visually implied as certain.
-9. Java, Kotlin, and Go use the same visual grammar.
-10. Light and dark themes remain readable.
+1. it does not look or behave like a plain call-tree widget.
+2. root, exact project call, declared-target call, external, unresolved, ambiguous, cycle, limit, and resolving states are distinguishable without color alone.
+3. root frame is initially expanded and child frames are collapsed.
+4. child methods can open inline as nested frames.
+5. analysis grows progressively using a local-first presentation.
+6. existing content remains reasonably stable as new results arrive.
+7. project boundary is represented locally and remains valid inside nested frames.
+8. Go goroutine/deferred metadata receives at least a minimal semantic visual treatment.
+9. indexing, cancelled, and stale states are not confused with unresolved code.
+10. selection exposes both target and call-site navigation where available.
+11. unsupported v0.1 control-flow semantics are explicitly disclosed.
+12. Java, Kotlin, and Go use the same core visual grammar.
+13. light and dark themes remain readable.
+14. flows can be panned/scrolled and fitted to the viewport.
 
 ---
 
-## 23. Visual Identity Summary
+## 24. Visual Identity Summary
 
-Flow Lens should visually communicate this progression:
+Flow Lens should communicate this progression:
 
 ```text
 CODE ENTRY
     ↓
-FLOW UNFOLDS
+ROOT FLOW APPEARS
     ↓
-METHODS OPEN
+CALLS BECOME RESOLVED / UNCERTAIN / EXTERNAL
     ↓
-BOUNDARIES / UNCERTAINTY BECOME VISIBLE
+USER OPENS METHOD FRAMES
     ↓
-USER FOLLOWS THE PATH BACK INTO CODE
+DEEPER FLOW UNFOLDS WITHOUT LOSING CONTEXT
+    ↓
+USER JUMPS BACK TO TARGET OR CALL SITE
 ```
 
 The goal is not to draw more arrows.
 
-The goal is to make static code structure feel like a navigable map whose visual vocabulary explains what kind of flow the analyzer actually found.
+The goal is to make static code structure feel like a navigable map whose visual vocabulary explains what the analyzer actually knows.
