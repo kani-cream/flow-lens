@@ -1,0 +1,14 @@
+plugins {
+    // Kotlin 2.3.x is required (not 2.2.x): the Kotlin analyzer compiles against the
+    // bundled Kotlin plugin of IntelliJ 2026.1, whose jars carry Kotlin 2.4 metadata.
+    // A compiler reads metadata one minor version ahead of itself, so 2.3.x reads 2.4
+    // metadata without -Xskip-metadata-version-check, which API_STABILITY.md forbids
+    // as a production compatibility strategy.
+    kotlin("jvm") version "2.3.21" apply false
+    id("org.jetbrains.intellij.platform") version "2.18.1" apply false
+}
+
+allprojects {
+    group = "com.kanicream.flowlens"
+    version = "0.0.1"
+}
