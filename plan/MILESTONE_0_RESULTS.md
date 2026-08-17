@@ -191,11 +191,15 @@ project) are **not yet measured** — scheduled for v0.1 hardening per
 
 ## 12. Known gaps and unresolved risks
 
-1. **Manual sandbox exercise not performed.** This milestone ran in a
-   headless session: the packaged ZIP was built and inspected but not
-   installed into a live IDE, and `runIde` interaction (canvas feel, focus,
-   themes, Japanese UI) is unverified. This is the largest remaining gate
-   item; everything needed (`./gradlew :plugin:runIde`, the ZIP) is ready.
+1. **Manual sandbox exercise: performed (2026-08-17) for Java and Go via
+   `runIde` with the `samples/manual-*` projects.** Findings, both fixed with
+   regression coverage where applicable: (a) the entry/frame header did not
+   navigate to the entry declaration on double-click (V0.1_SPEC §18) — added;
+   (b) navigation dereferenced a smart pointer on the EDT without a read
+   action, logging a threading assertion — wrapped in `ReadAction.compute`.
+   Still outstanding: installed-ZIP (non-sandbox) check, Kotlin/mixed sample
+   pass in the sandbox, theme/keyboard/Japanese-UI sweep of the full manual
+   checklist.
 2. **Go-plugin-absent runtime path untested in a live IDE.** Structurally
    guaranteed (optional descriptor + bytecode isolation test), but the
    "IDE without Go still starts and analyzes Java/Kotlin" scenario should be

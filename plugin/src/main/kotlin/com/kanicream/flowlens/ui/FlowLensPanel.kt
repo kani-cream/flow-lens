@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.application.EDT
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.DumbAware
@@ -112,9 +113,14 @@ class FlowLensPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         if (location == null) return
         val runId = currentRunId ?: return
         val pointer = service.navigationPointer(runId, location.handle) ?: return
-        val element = pointer.element ?: return
-        val file = element.containingFile?.virtualFile ?: return
-        OpenFileDescriptor(project, file, element.textOffset).navigate(true)
+        // PSI (pointer dereference) requires read access even on the EDT; only the
+        // resulting descriptor is used outside the read action.
+        val descriptor = ReadAction.compute<OpenFileDescriptor?, RuntimeException> {
+            val element = pointer.element ?: return@compute null
+            val file = element.containingFile?.virtualFile ?: return@compute null
+            OpenFileDescriptor(project, file, element.textOffset)
+        } ?: return
+        descriptor.navigate(true)
     }
 
     override fun dispose() {
