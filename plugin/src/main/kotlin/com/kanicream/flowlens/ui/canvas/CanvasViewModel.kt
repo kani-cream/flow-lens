@@ -10,6 +10,7 @@ import com.kanicream.flowlens.core.model.FlowNodeKind
 import com.kanicream.flowlens.core.model.NodeId
 import com.kanicream.flowlens.core.model.OrderingStatus
 import com.kanicream.flowlens.core.model.ResolutionStatus
+import com.kanicream.flowlens.core.model.SourceOrigin
 import com.kanicream.flowlens.service.FlowMetadata
 import com.kanicream.flowlens.core.model.FrameId
 import java.awt.Rectangle
@@ -259,6 +260,11 @@ object CanvasViewModelBuilder {
         }
         if (node.metadata[FlowMetadata.TEST_SOURCE] == "true") {
             add(FlowLensBundle.message("card.badge.test.source"))
+        }
+        // A generated member has no authored body to open, so say why rather than
+        // letting the card look like an ordinary call that simply has no calls.
+        if (node.metadata[FlowMetadata.ORIGIN] == SourceOrigin.SYNTHETIC.name) {
+            add(FlowLensBundle.message("card.badge.generated"))
         }
     }
 

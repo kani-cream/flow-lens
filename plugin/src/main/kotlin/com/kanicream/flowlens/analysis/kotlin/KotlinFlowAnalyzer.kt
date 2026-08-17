@@ -7,11 +7,14 @@ import com.intellij.psi.util.PsiTreeUtil
 import com.kanicream.flowlens.analysis.DirectFlowExtraction
 import com.kanicream.flowlens.analysis.ExtractedCall
 import com.kanicream.flowlens.analysis.FlowLanguageAnalyzer
+import com.kanicream.flowlens.analysis.PsiClassification
 import com.kanicream.flowlens.analysis.ResolvedCallTarget
 import com.kanicream.flowlens.analysis.TargetClassifier
 import com.kanicream.flowlens.core.model.DispatchConfidence
 import com.kanicream.flowlens.core.model.FlowNodeKind
 import com.kanicream.flowlens.core.model.FlowSymbol
+import com.kanicream.flowlens.core.model.ResolutionStatus
+import com.kanicream.flowlens.core.model.SourceOrigin
 import org.jetbrains.kotlin.idea.KotlinLanguage
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.lexer.KtTokens
@@ -86,7 +89,22 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
         val site = call.callSite as? KtCallExpression ?: return ResolvedCallTarget.UNRESOLVED
         val callee = site.calleeExpression ?: return ResolvedCallTarget.UNRESOLVED
         val resolved = callee.mainReference?.resolve() ?: return ResolvedCallTarget.UNRESOLVED
-        val isConstructor = resolved is KtConstructor<*> || resolved is KtClass ||
+        val calleeName = (callee as? KtNameReferenceExpression)?.getReferencedName()
+
+        // A compiler-generated member has no declaration of its own, so resolution
+        // lands on something related instead: `copy` resolves to the primary
+        // constructor and `componentN` to the property it returns. Trusting that
+        // result reported `u.copy()` as the constructor call `User()` and
+        // `u.component1()` as `name()`. When resolution did not land on a callable
+        // and the name written at the call site is not the type's own name, the
+        // call is a generated member and keeps the name the author wrote.
+        val landedOnCallable = resolved is KtNamedFunction ||
+            (resolved is PsiMethod && !resolved.isConstructor)
+        if (!landedOnCallable && calleeName != null && calleeName != ownerTypeName(resolved)) {
+            return generatedMemberOf(resolved, calleeName)
+        }
+
+        val isConstructor = resolved is KtConstructor<*> || resolved is KtClassOrObject ||
             (resolved is PsiMethod && resolved.isConstructor)
         // `super.foo()` names one implementation statically, like Java's super call.
         val explicitSuper = (site.parent as? KtDotQualifiedExpression)
@@ -98,7 +116,40 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
             confidence,
             isConstructor = isConstructor,
             // Constructor calls resolving to the class itself have no explicit body.
-            forceNoBody = resolved is KtClass,
+            forceNoBody = resolved is KtClassOrObject,
+        )
+    }
+
+    /** The type that owns [resolved], for naming and grouping generated members. */
+    private fun ownerTypeName(resolved: PsiElement): String? =
+        PsiTreeUtil.getParentOfType(resolved, KtClassOrObject::class.java, false)?.name
+            ?: (resolved as? PsiMethod)?.containingClass?.name
+
+    /**
+     * A member the compiler generates. It keeps the name written at the call site,
+     * is classified as generated rather than authored source, and is never entered
+     * — but it still navigates to the declaration it was generated from
+     * (`KNOWN_LIMITATIONS.md` §4).
+     */
+    private fun generatedMemberOf(resolved: PsiElement, memberName: String): ResolvedCallTarget {
+        val owner = PsiTreeUtil.getParentOfType(resolved, KtClassOrObject::class.java, false)
+        val qualifier = owner?.fqName?.asString() ?: owner?.name ?: "?"
+        return ResolvedCallTarget(
+            declaration = resolved,
+            symbol = FlowSymbol(
+                languageId = languageId,
+                displayName = "$memberName()",
+                containerName = owner?.name,
+                key = "kotlin:$qualifier#$memberName(generated)",
+            ),
+            resolutionStatus = ResolutionStatus.PROJECT_LOCAL,
+            // Which generated member runs is not in doubt; it simply has no body
+            // Flow Lens can show.
+            dispatchConfidence = DispatchConfidence.EXACT,
+            sourceOrigin = SourceOrigin.SYNTHETIC,
+            hasAnalyzableBody = false,
+            isConstructor = false,
+            inTestSource = PsiClassification.isInTestSource(resolved.project, resolved),
         )
     }
 
