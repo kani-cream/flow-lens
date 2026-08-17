@@ -51,17 +51,12 @@ class FlowLensSettingsTest : BasePlatformTestCase() {
 
     fun `test snapshot is detached from later settings changes`() {
         val before = settings.snapshot()
-        settings.updateMaxDepth(FlowLensSettings.MAX_DEPTH)
-        assertEquals(FlowLimits.DEFAULT_MAX_DEPTH, before.maxDepth)
-        assertEquals(FlowLensSettings.MAX_DEPTH, settings.snapshot().maxDepth)
-    }
-
-    fun `test quick depth choices are inside the supported range`() {
-        assertTrue(
-            FlowLensSettings.QUICK_DEPTHS.all {
-                it in FlowLensSettings.MIN_DEPTH..FlowLensSettings.MAX_DEPTH
-            },
+        settings.state.maxDepth = FlowLensSettings.MAX_DEPTH
+        assertEquals(
+            "a run keeps the configuration it started with",
+            FlowLimits.DEFAULT_MAX_DEPTH,
+            before.maxDepth,
         )
-        assertTrue(FlowLimits.DEFAULT_MAX_DEPTH in FlowLensSettings.QUICK_DEPTHS)
+        assertEquals(FlowLensSettings.MAX_DEPTH, settings.snapshot().maxDepth)
     }
 }

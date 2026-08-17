@@ -46,19 +46,11 @@ class FlowLensSettings : PersistentStateComponent<FlowLensSettings.State> {
         includeLibraries = state.includeLibraries,
     )
 
-    /** Replaces the depth used by the next run. Values outside the range are clamped. */
-    fun updateMaxDepth(depth: Int) {
-        state.maxDepth = depth.coerceIn(MIN_DEPTH, MAX_DEPTH)
-    }
-
     companion object {
         const val MIN_DEPTH: Int = 1
         const val MAX_DEPTH: Int = 10
         const val MIN_NODES: Int = 10
         const val MAX_NODES: Int = 1000
-
-        /** Depth values offered as one-click choices in the toolbar. */
-        val QUICK_DEPTHS: List<Int> = listOf(1, 2, 3, 4, 5)
 
         fun getInstance(project: Project): FlowLensSettings =
             project.getService(FlowLensSettings::class.java)

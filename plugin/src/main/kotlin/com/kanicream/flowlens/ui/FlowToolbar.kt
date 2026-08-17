@@ -8,7 +8,6 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
-import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
@@ -18,7 +17,12 @@ import com.kanicream.flowlens.settings.FlowLensSettings
 import javax.swing.JComponent
 
 /**
- * Analyze / Stop / Fit / depth / settings entry points (guardrails §12).
+ * Analyze / Stop / Fit / settings entry points (guardrails §12).
+ *
+ * The depth control lives only in settings: its value applies to the next run,
+ * so surfacing it next to the running analysis suggests an effect it does not
+ * have (owner decision, 2026-08-17).
+ *
  * The toolbar only issues commands; it holds no analysis state.
  */
 class FlowToolbar(
@@ -40,7 +44,6 @@ class FlowToolbar(
         Separator.getInstance(),
         FitAction(),
         Separator.getInstance(),
-        DepthActionGroup(),
         SettingsAction(),
     )
 
@@ -87,34 +90,6 @@ class FlowToolbar(
         override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
 
         override fun actionPerformed(e: AnActionEvent) = commands.fitToView()
-    }
-
-    /** Quick depth choices; the value applies to the next run, never the current one. */
-    private inner class DepthActionGroup : DefaultActionGroup(), DumbAware {
-        init {
-            isPopup = true
-            templatePresentation.icon = AllIcons.Actions.ListChanges
-            FlowLensSettings.QUICK_DEPTHS.forEach { add(DepthAction(it)) }
-        }
-
-        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
-
-        override fun update(e: AnActionEvent) {
-            val depth = FlowLensSettings.getInstance(project).snapshot().maxDepth
-            e.presentation.text = FlowLensBundle.message("action.depth.text", depth)
-            e.presentation.description = FlowLensBundle.message("action.depth.description")
-        }
-    }
-
-    private inner class DepthAction(private val depth: Int) : ToggleAction(depth.toString()), DumbAware {
-        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
-
-        override fun isSelected(e: AnActionEvent): Boolean =
-            FlowLensSettings.getInstance(project).snapshot().maxDepth == depth
-
-        override fun setSelected(e: AnActionEvent, selected: Boolean) {
-            if (selected) FlowLensSettings.getInstance(project).updateMaxDepth(depth)
-        }
     }
 
     private inner class SettingsAction : AnAction(
