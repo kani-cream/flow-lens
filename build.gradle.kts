@@ -10,5 +10,6 @@ plugins {
 
 allprojects {
     group = "com.kanicream.flowlens"
-    version = "0.0.1"
+    // v0.1: multi-language method flow + Flow Canvas (see plan/V0.1_SPEC.md).
+    version = "0.1.0"
 }

@@ -19,6 +19,25 @@
         nothing anywhere.</p>
     ]]></description>
 
+    <change-notes><![CDATA[
+        <p><b>0.1.0 — Multi-language method flow and Flow Canvas.</b></p>
+        <ul>
+            <li>Analyze a Java, Kotlin, or Go function into an explorable flow map;
+            analysis crosses Java/Kotlin boundaries per resolved target.</li>
+            <li>Evaluation-order call extraction for nested, chained, and argument
+            calls; call sites stay distinct from target symbols.</li>
+            <li>Resolution and dispatch classification: project, external,
+            unresolved, built-in; exact, declared target, ambiguous, unknown.</li>
+            <li>Go goroutine and defer semantics preserved; compiler-generated
+            declarations are never followed as authored code.</li>
+            <li>Progressive local-first canvas with nested frame expansion, cycle,
+            depth-limit and node-limit markers, project-boundary crossings,
+            selection details, and target / call-site navigation.</li>
+            <li>Bounded cancellable analysis off the EDT, with indexing wait and
+            stale-source handling; project-scoped settings; English and Japanese UI.</li>
+        </ul>
+    ]]></change-notes>
+
     <resource-bundle>messages.FlowLensBundle</resource-bundle>
 
     <depends>com.intellij.modules.platform</depends>
