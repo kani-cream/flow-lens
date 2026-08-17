@@ -13,7 +13,8 @@ import javax.swing.JPanel
  */
 class FlowLensPanel(project: Project) : JPanel(BorderLayout()), Disposable {
 
-    private val controller = FlowLensController(project)
+    /** Internal so lifecycle tests can assert the disposal chain. */
+    internal val controller = FlowLensController(project)
 
     init {
         Disposer.register(this, controller)
