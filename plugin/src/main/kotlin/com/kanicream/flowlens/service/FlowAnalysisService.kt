@@ -1,5 +1,6 @@
 package com.kanicream.flowlens.service
 
+import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
@@ -38,6 +39,14 @@ class FlowAnalysisService(
     private var activeJob: Job? = null
     private var activeRunId: RunId? = null
     private var activeHandles: RunHandles? = null
+    private var lastRequest: AnalysisRequest? = null
+
+    /** The root request of the current run, kept so it can be repeated. */
+    private data class AnalysisRequest(
+        val file: VirtualFile,
+        val offset: Int,
+        val rootHandle: LocationId? = null,
+    )
 
     private val mutableResults = MutableStateFlow<FlowAnalysisResult?>(null)
     private val mutableProgress = MutableStateFlow<FlowProgress?>(null)
@@ -65,6 +74,7 @@ class FlowAnalysisService(
             previous = activeJob
             activeRunId = runId
             activeHandles = handles
+            lastRequest = AnalysisRequest(file, offset)
             // The old flow stops being current the moment a new root is requested
             // (REPO_LENS_LESSONS.md 3.6).
             mutableResults.value = null
@@ -94,6 +104,22 @@ class FlowAnalysisService(
         synchronized(lock) { activeJob }?.cancel()
     }
 
+    /**
+     * Repeats the last analysis, used by the re-analyze affordance after a stale,
+     * cancelled, or failed run. The root is located through its smart pointer so
+     * an edit that moved the declaration does not restart from a wrong offset;
+     * the original caret offset is the fallback.
+     */
+    fun reanalyze(): RunId? {
+        val request = synchronized(lock) { lastRequest } ?: return null
+        val pointer = synchronized(lock) { activeHandles }?.pointer(request.rootHandle ?: LocationId(-1))
+        val offset = runReadActionBlocking {
+            pointer?.element?.takeIf { it.isValid }?.textOffset ?: request.offset
+        }
+        if (!request.file.isValid) return null
+        return startAnalysis(request.file, offset)
+    }
+
     /** Resolves a neutral location handle for navigation. Current run only. */
     fun navigationPointer(runId: RunId, location: LocationId): SmartPsiElementPointer<PsiElement>? {
         val handles = synchronized(lock) {
@@ -107,6 +133,10 @@ class FlowAnalysisService(
         synchronized(lock) {
             if (activeRunId != event.runId) return
             mutableResults.value = event.result
+            val rootHandle = event.result.rootFrame?.entryLocation?.handle
+            if (rootHandle != null && lastRequest?.rootHandle == null) {
+                lastRequest = lastRequest?.copy(rootHandle = rootHandle)
+            }
         }
     }
 

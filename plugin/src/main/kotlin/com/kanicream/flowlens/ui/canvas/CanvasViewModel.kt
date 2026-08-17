@@ -11,6 +11,7 @@ import com.kanicream.flowlens.core.model.NodeId
 import com.kanicream.flowlens.core.model.OrderingStatus
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.service.FlowMetadata
+import com.kanicream.flowlens.core.model.FrameId
 import java.awt.Rectangle
 
 /** Visual treatment category of a card; states stay distinguishable without color alone. */
@@ -38,11 +39,21 @@ class CardVM(
     val dashedIncomingConnector: Boolean,
     val expandable: Boolean,
     val expanded: Boolean,
+    val resolving: Boolean,
+    val depthLimited: Boolean,
     val callsInside: Int,
     val childFrame: FrameVM?,
 ) {
     val nodeId: NodeId get() = node.id
     var bounds: Rectangle = Rectangle()
+
+    /** Bottom of everything this card owns: its own box, stub, and expanded frame. */
+    val occupiedBottom: Int
+        get() {
+            val frameBottom = childFrame?.bounds?.let { it.y + it.height } ?: 0
+            val stub = if (depthLimited) CanvasMetrics.LIMIT_STUB_HEIGHT else 0
+            return maxOf(bounds.y + bounds.height + stub, frameBottom)
+        }
 }
 
 /** One rendered frame container (analyzed callable body). */
@@ -72,6 +83,7 @@ object CanvasMetrics {
     const val FRAME_HEADER = 34
     const val CHILD_INDENT = 18
     const val CANVAS_MARGIN = 24
+    const val LIMIT_STUB_HEIGHT = 20
 }
 
 /**
@@ -146,6 +158,8 @@ object CanvasViewModelBuilder {
         val childVM = if (expanded && childFrame != null) {
             frameVM(result, childFrame, expandedNodes, isRoot = false)
         } else {
+            // A collapsed child frame is not laid out at all, so a deep result
+            // costs nothing until the user opens it.
             null
         }
         return CardVM(
@@ -156,9 +170,16 @@ object CanvasViewModelBuilder {
             style = style,
             depthLabel = FlowLensBundle.message("card.depth.label", node.depth),
             boundaryBeforeCard = node.resolutionStatus == ResolutionStatus.EXTERNAL,
-            dashedIncomingConnector = node.orderingStatus != OrderingStatus.DETERMINISTIC,
+            // A conditional call is not a proven continuation, so it must not get
+            // the ordinary certain connector either (`V0.1_SPEC.md` §13).
+            dashedIncomingConnector = node.orderingStatus != OrderingStatus.DETERMINISTIC ||
+                node.metadata[FlowMetadata.CONDITIONAL] == "true",
             expandable = expandable,
             expanded = expanded,
+            // The target frame exists but has not been analyzed yet: a transient
+            // UI-only state that never counts against the node budget.
+            resolving = childFrame != null && !childFrame.bodyComplete,
+            depthLimited = node.metadata[FlowMetadata.LIMIT] == FlowMetadata.LIMIT_DEPTH,
             callsInside = childFrame?.events?.size ?: 0,
             childFrame = childVM,
         )
@@ -225,6 +246,9 @@ object CanvasViewModelBuilder {
                 if (card.badges.isEmpty()) 0 else CanvasMetrics.CARD_BADGE_EXTRA
             card.bounds = Rectangle(cardX, cursorY, CanvasMetrics.CARD_WIDTH, cardHeight)
             cursorY += cardHeight
+            // A call that could not be entered because of the depth limit keeps an
+            // explicit continuation marker: a connector never just stops.
+            if (card.depthLimited) cursorY += CanvasMetrics.LIMIT_STUB_HEIGHT
             card.childFrame?.let { child ->
                 cursorY += CanvasMetrics.CONNECTOR_GAP / 2
                 val childRect = layoutFrame(child, cardX + CanvasMetrics.CHILD_INDENT, cursorY)

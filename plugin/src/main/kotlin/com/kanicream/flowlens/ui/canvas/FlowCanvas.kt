@@ -38,6 +38,7 @@ class FlowCanvas : JComponent() {
 
     var onSelectionChanged: (CardVM?) -> Unit = {}
     var onNavigateToTarget: (CardVM) -> Unit = {}
+    var onNavigateToCallSite: (CardVM) -> Unit = {}
     var onNavigateToFrameEntry: (FrameVM) -> Unit = {}
 
     private var result: FlowAnalysisResult? = null
@@ -75,6 +76,16 @@ class FlowCanvas : JComponent() {
         if (!card.expandable) return
         if (!expandedNodes.remove(card.nodeId)) expandedNodes += card.nodeId
         rebuild()
+    }
+
+    private fun expand(card: CardVM) {
+        if (!card.expandable || card.expanded) return
+        expandedNodes += card.nodeId
+        rebuild()
+    }
+
+    private fun collapse(card: CardVM) {
+        if (expandedNodes.remove(card.nodeId)) rebuild()
     }
 
     fun fitToView() {
@@ -151,14 +162,30 @@ class FlowCanvas : JComponent() {
         for (card in frame.cards) {
             previous?.let { paintConnector(g2, it, card) }
             paintCard(g2, card)
+            if (card.depthLimited) paintDepthLimitStub(g2, card)
             card.childFrame?.let { paintFrame(g2, it) }
             previous = card
         }
     }
 
+    /** Explicit continuation marker: more code exists but was not analyzed. */
+    private fun paintDepthLimitStub(g2: Graphics2D, card: CardVM) {
+        val x = card.bounds.x + 14
+        val y = card.bounds.y + card.bounds.height
+        g2.color = Palette.connector
+        g2.stroke = DASHED_STROKE
+        g2.drawLine(x, y + 2, x, y + CanvasMetrics.LIMIT_STUB_HEIGHT - 6)
+        g2.font = JBUI.Fonts.smallFont()
+        g2.color = Palette.mutedText
+        g2.drawString(
+            FlowLensBundle.message("card.limit.depth.hint"),
+            x + 8,
+            y + CanvasMetrics.LIMIT_STUB_HEIGHT - 5,
+        )
+    }
+
     private fun paintConnector(g2: Graphics2D, from: CardVM, to: CardVM) {
-        val fromBottom = from.childFrame?.bounds?.let { it.y + it.height }
-            ?: (from.bounds.y + from.bounds.height)
+        val fromBottom = from.occupiedBottom
         val x = from.bounds.x + from.bounds.width / 2
         val yEnd = to.bounds.y
         g2.color = Palette.connector
@@ -218,6 +245,10 @@ class FlowCanvas : JComponent() {
                 if (isNotEmpty()) append("  ")
                 append(if (card.expanded) "▾ " else "▸ ")
                 append(FlowLensBundle.message("card.calls.inside", card.callsInside))
+            }
+            if (card.resolving) {
+                if (isNotEmpty()) append("  ")
+                append(FlowLensBundle.message("card.resolving"))
             }
         }
         if (secondLine.isNotEmpty()) {
@@ -320,12 +351,18 @@ class FlowCanvas : JComponent() {
     private fun installKeyboardHandling() {
         addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
-                when (e.keyCode) {
-                    KeyEvent.VK_DOWN -> moveSelection(1)
-                    KeyEvent.VK_UP -> moveSelection(-1)
-                    KeyEvent.VK_ENTER -> selectedCard()?.let(onNavigateToTarget)
-                    KeyEvent.VK_SPACE -> selectedCard()?.let(::toggleExpansion)
-                    KeyEvent.VK_ESCAPE -> select(null)
+                when {
+                    e.keyCode == KeyEvent.VK_DOWN -> moveSelection(1)
+                    e.keyCode == KeyEvent.VK_UP -> moveSelection(-1)
+                    // Shift+Enter is the explicit call-site action; plain Enter keeps
+                    // the documented default of opening the target (`V0.1_SPEC.md` §18).
+                    e.keyCode == KeyEvent.VK_ENTER && e.isShiftDown ->
+                        selectedCard()?.let(onNavigateToCallSite)
+                    e.keyCode == KeyEvent.VK_ENTER -> selectedCard()?.let(onNavigateToTarget)
+                    e.keyCode == KeyEvent.VK_SPACE -> selectedCard()?.let(::toggleExpansion)
+                    e.keyCode == KeyEvent.VK_RIGHT -> selectedCard()?.let(::expand)
+                    e.keyCode == KeyEvent.VK_LEFT -> selectedCard()?.let(::collapse)
+                    e.keyCode == KeyEvent.VK_ESCAPE -> select(null)
                     else -> return
                 }
                 e.consume()

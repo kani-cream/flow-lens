@@ -190,6 +190,69 @@ class CanvasViewModelTest : BasePlatformTestCase() {
         assertEquals(cards.map { it.bounds.y }.sorted(), cards.map { it.bounds.y })
     }
 
+    fun `test conditional calls do not get the certain connector`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), null)
+        b.addEvent(root, spec("always"))
+        b.addEvent(
+            root,
+            spec("maybe").copy(
+                metadata = mapOf(com.kanicream.flowlens.service.FlowMetadata.CONDITIONAL to "true"),
+            ),
+        )
+        val cards = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!.cards
+        assertFalse(cards[0].dashedIncomingConnector)
+        assertTrue("a call that may not execute must not imply a proven path", cards[1].dashedIncomingConnector)
+    }
+
+    fun `test a queued child frame renders as resolving and is not yet expandable`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), null)
+        val call = b.addEvent(root, spec("child"))!!
+        val child = b.openChildFrame(root, call, symbol("child"), null)
+        val beforeAnalysis = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.RUNNING), emptySet())!!.cards.single()
+        assertTrue(beforeAnalysis.resolving)
+        assertFalse(beforeAnalysis.expandable)
+
+        b.addEvent(child, spec("inner"))
+        b.markFrameComplete(child)
+        val afterAnalysis = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!.cards.single()
+        assertFalse(afterAnalysis.resolving)
+        assertTrue(afterAnalysis.expandable)
+        assertEquals(1, afterAnalysis.callsInside)
+    }
+
+    fun `test depth limited calls reserve space for an explicit continuation marker`() {
+        val limited = FlowEventSpec(
+            kind = FlowNodeKind.CALL,
+            callSiteLocation = null,
+            targetSymbol = symbol("deep"),
+            resolutionStatus = ResolutionStatus.PROJECT_LOCAL,
+            dispatchConfidence = DispatchConfidence.EXACT,
+            metadata = mapOf(
+                com.kanicream.flowlens.service.FlowMetadata.LIMIT to
+                    com.kanicream.flowlens.service.FlowMetadata.LIMIT_DEPTH,
+            ),
+        )
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), null)
+        b.addEvent(root, limited)
+        b.addEvent(root, spec("next"))
+        val cards = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!.cards
+        assertTrue(cards[0].depthLimited)
+        assertFalse(cards[1].depthLimited)
+        assertTrue(
+            "the marker must occupy layout space below the card",
+            cards[0].occupiedBottom >= cards[0].bounds.y + cards[0].bounds.height +
+                CanvasMetrics.LIMIT_STUB_HEIGHT,
+        )
+        assertTrue("the next card starts below the marker", cards[1].bounds.y > cards[0].occupiedBottom)
+    }
+
     fun `test frames expose entry locations and clickable headers for navigation`() {
         // Regression (sandbox feedback): double-clicking the root/entry header must
         // navigate back to the entry declaration (V0.1_SPEC.md section 18).
