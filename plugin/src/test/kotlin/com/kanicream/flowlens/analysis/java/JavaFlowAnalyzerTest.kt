@@ -119,10 +119,14 @@ class JavaFlowAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(listOf(DispatchConfidence.EXACT, DispatchConfidence.EXACT), confidences)
     }
 
-    fun `test ordinary virtual call is declared target`() {
-        myFixture.configureByText(
+    fun `test an overridden virtual call is a declared target`() {
+        myFixture.addFileToProject(
             "Service.java",
             "public class Service { public void work() { } }",
+        )
+        myFixture.addFileToProject(
+            "PremiumService.java",
+            "public class PremiumService extends Service { @Override public void work() { } }",
         )
         val extraction = extractionOf(
             """
@@ -133,6 +137,56 @@ class JavaFlowAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(DispatchConfidence.DECLARED_TARGET, target.dispatchConfidence)
         assertEquals(ResolutionStatus.PROJECT_LOCAL, target.resolutionStatus)
         assertTrue(target.hasAnalyzableBody)
+    }
+
+    fun `test a virtual call nothing overrides is exact`() {
+        // Java methods are virtual by default; reporting every ordinary call as
+        // "runtime override may differ" would make the marker meaningless.
+        myFixture.addFileToProject(
+            "Lonely.java",
+            "public class Lonely { public void work() { } }",
+        )
+        val extraction = extractionOf(
+            """
+            void run(Lonely s) { s.work(); }
+            """.trimIndent(),
+        )
+        val target = analyzer.resolveCall(extraction.calls.single())
+        assertEquals(DispatchConfidence.EXACT, target.dispatchConfidence)
+        assertTrue(target.hasAnalyzableBody)
+    }
+
+    fun `test a subclass that does not override the method keeps it exact`() {
+        myFixture.addFileToProject(
+            "Base2.java",
+            "public class Base2 { public void work() { } public void other() { } }",
+        )
+        myFixture.addFileToProject(
+            "Child2.java",
+            "public class Child2 extends Base2 { @Override public void other() { } }",
+        )
+        val extraction = extractionOf(
+            """
+            void run(Base2 s) { s.work(); }
+            """.trimIndent(),
+        )
+        val target = analyzer.resolveCall(extraction.calls.single())
+        assertEquals(
+            "only an actual override makes the target uncertain",
+            DispatchConfidence.EXACT,
+            target.dispatchConfidence,
+        )
+    }
+
+    fun `test calls inside the same class are exact when nothing extends it`() {
+        val extraction = extractionOf(
+            """
+            void run() { helper(); }
+            void helper() { }
+            """.trimIndent(),
+        )
+        val target = analyzer.resolveCall(extraction.calls.single())
+        assertEquals(DispatchConfidence.EXACT, target.dispatchConfidence)
     }
 
     fun `test interface call without body is ambiguous and not recursable`() {

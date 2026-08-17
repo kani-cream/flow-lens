@@ -20,6 +20,11 @@ import com.intellij.psi.PsiPolyadicExpression
 import com.intellij.psi.PsiSuperExpression
 import com.intellij.psi.PsiSwitchBlock
 import com.intellij.psi.PsiTryStatement
+import com.intellij.psi.search.searches.ClassInheritorsSearch
+import com.intellij.psi.search.searches.OverridingMethodsSearch
+import com.intellij.psi.util.CachedValueProvider
+import com.intellij.psi.util.CachedValuesManager
+import com.intellij.psi.util.PsiModificationTracker
 import com.intellij.psi.util.PsiTreeUtil
 import com.kanicream.flowlens.analysis.DirectFlowExtraction
 import com.kanicream.flowlens.analysis.ExtractedCall
@@ -105,9 +110,46 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
         return when {
             nonOverridable -> DispatchConfidence.EXACT
             method.body == null -> DispatchConfidence.AMBIGUOUS
-            else -> DispatchConfidence.DECLARED_TARGET
+            // Java methods are virtual by default, so reporting every ordinary
+            // call as "runtime override may differ" drowns the cases where that
+            // is actually true. The declared body is the only implementation
+            // unless something in the project overrides it.
+            isOverriddenInProject(method) -> DispatchConfidence.DECLARED_TARGET
+            else -> DispatchConfidence.EXACT
         }
     }
+
+    /**
+     * Whether some subclass overrides [method].
+     *
+     * Both searches are index-backed, bounded to the first hit, and cached per
+     * declaration until PSI changes, so a frame with many calls does not turn
+     * into a series of repeated searches. The cheap class-level question is asked
+     * first: most calls resolve to a type nothing extends, and then no
+     * per-method search happens at all.
+     *
+     * Runtime substitution that leaves no source behind — proxies, generated
+     * bytecode, dependency injection — is out of scope by design
+     * (`KNOWN_LIMITATIONS.md` §2).
+     */
+    private fun isOverriddenInProject(method: PsiMethod): Boolean {
+        val containingClass = method.containingClass ?: return false
+        if (!hasInheritors(containingClass)) return false
+        return CachedValuesManager.getCachedValue(method) {
+            CachedValueProvider.Result.create(
+                OverridingMethodsSearch.search(method).findFirst() != null,
+                PsiModificationTracker.MODIFICATION_COUNT,
+            )
+        }
+    }
+
+    private fun hasInheritors(psiClass: PsiClass): Boolean =
+        CachedValuesManager.getCachedValue(psiClass) {
+            CachedValueProvider.Result.create(
+                ClassInheritorsSearch.search(psiClass).findFirst() != null,
+                PsiModificationTracker.MODIFICATION_COUNT,
+            )
+        }
 
     private fun symbolOf(method: PsiMethod): FlowSymbol {
         val container = method.containingClass

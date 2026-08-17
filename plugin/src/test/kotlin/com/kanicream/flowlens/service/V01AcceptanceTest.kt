@@ -143,6 +143,7 @@ class V01AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
                 void run(Service s) { s.work(); }
             }
             class Service { public void work() { } }
+            class PremiumService extends Service { @Override public void work() { } }
             """.trimIndent(),
             "void run(Service s)",
         )

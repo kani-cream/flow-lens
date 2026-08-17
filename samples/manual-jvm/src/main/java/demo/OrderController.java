@@ -17,7 +17,7 @@ public class OrderController {
         save(convert(load()));            // B: nested -> load, convert, save
         validate(1);                      // D: duplicate target,
         validate(2);                      //    two separate call cards
-        service.work();                   // G: DECLARED TARGET (virtual)
+        service.work();                   // G: DECLARED TARGET (PremiumPaymentService overrides it)
         gateway.charge();                 // H: AMBIGUOUS (interface, impl exists)
         new Receipt();                    // constructor card
         rawOrder.trim();                  // J: EXTERNAL + PROJECT BOUNDARY
