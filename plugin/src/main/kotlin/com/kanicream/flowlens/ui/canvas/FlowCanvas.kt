@@ -45,6 +45,7 @@ class FlowCanvas : JComponent() {
     var onNavigateToCallSite: (CardVM) -> Unit = {}
     var onNavigateToFrameEntry: (FrameVM) -> Unit = {}
     var onContextMenu: (Point) -> Unit = {}
+    var onEntrySelected: () -> Unit = {}
 
     private var result: FlowAnalysisResult? = null
     private val expandedNodes = mutableSetOf<NodeId>()
@@ -52,6 +53,7 @@ class FlowCanvas : JComponent() {
     private var visibleCards: List<CardVM> = emptyList()
     private var visibleFrames: List<FrameVM> = emptyList()
     private var selectedNodeId: NodeId? = null
+    private var entrySelected = false
     private var zoom = 1.0
     private var hoveredExpander: NodeId? = null
     private var dragStart: Point? = null
@@ -71,6 +73,7 @@ class FlowCanvas : JComponent() {
         if (runChanged) {
             expandedNodes.clear()
             selectedNodeId = null
+            entrySelected = false
             zoom = 1.0
             onSelectionChanged(null)
             onZoomChanged()
@@ -79,6 +82,9 @@ class FlowCanvas : JComponent() {
     }
 
     fun selectedCard(): CardVM? = visibleCards.firstOrNull { it.nodeId == selectedNodeId }
+
+    /** The entry frame when it is the current selection, for navigation actions. */
+    fun selectedEntry(): FrameVM? = rootVM?.takeIf { entrySelected }
 
     /** Returns true when the expansion state actually changed. */
     fun toggleExpansion(card: CardVM): Boolean {
@@ -245,6 +251,7 @@ class FlowCanvas : JComponent() {
         g2.color = Palette.rootFrameBorder
         g2.stroke = BasicStroke(2f)
         g2.drawRoundRect(b.x, b.y, b.width, b.height, 16, 16)
+        if (entrySelected) paintSelectionRing(g2, b, 16)
 
         g2.font = JBUI.Fonts.label().asBold()
         g2.color = Palette.text
@@ -342,16 +349,36 @@ class FlowCanvas : JComponent() {
     /** Draws the box for a call: just the card, or the whole container when expanded. */
     private fun paintCardBox(g2: Graphics2D, card: CardVM) {
         val box = card.containerBounds
-        val selected = card.nodeId == selectedNodeId
         g2.color = cardBackground(card.style)
         g2.fillRoundRect(box.x, box.y, box.width, box.height, 12, 12)
-        g2.color = if (selected) Palette.selectionBorder else cardBorder(card.style)
+        // The element always keeps its own border: recolouring it for selection
+        // used to erase the state it encodes, such as an external target's border.
+        g2.color = cardBorder(card.style)
         g2.stroke = when {
-            selected -> BasicStroke(2f)
             card.style == CardStyle.UNRESOLVED || card.style == CardStyle.AMBIGUOUS -> DASHED_STROKE
             else -> SOLID_STROKE
         }
         g2.drawRoundRect(box.x, box.y, box.width, box.height, 12, 12)
+        if (card.nodeId == selectedNodeId) paintSelectionRing(g2, box, 12)
+    }
+
+    /**
+     * Selection is drawn as a ring outside the element, so it never competes with
+     * the element's own colour — including the entry frame, which is blue for a
+     * different reason.
+     */
+    private fun paintSelectionRing(g2: Graphics2D, box: Rectangle, arc: Int) {
+        g2.color = Palette.selectionBorder
+        g2.stroke = BasicStroke(2f)
+        val inset = SELECTION_RING_GAP
+        g2.drawRoundRect(
+            box.x - inset,
+            box.y - inset,
+            box.width + inset * 2,
+            box.height + inset * 2,
+            arc + inset,
+            arc + inset,
+        )
     }
 
     /**
@@ -442,14 +469,14 @@ class FlowCanvas : JComponent() {
                     onContextMenu(e.point)
                     return
                 }
-                if (card == null) {
+                if (card == null && frameHeaderAt(e.point) == null) {
                     dragStart = e.locationOnScreen
                     dragOrigin = visibleRect.location
-                    // Entry/frame headers open the frame's declaration
-                    // (V0.1_SPEC.md section 18: entry opens entry declaration).
-                    if (e.clickCount == 2) {
-                        frameHeaderAt(e.point)?.let(onNavigateToFrameEntry)
-                    }
+                }
+                if (card == null && frameHeaderAt(e.point) != null) {
+                    selectEntry()
+                    if (e.clickCount == 2) rootVM?.let(onNavigateToFrameEntry)
+                    return
                 }
                 select(card)
                 if (card == null) return
@@ -544,7 +571,18 @@ class FlowCanvas : JComponent() {
     /** Returns true when the selection actually moved. */
     private fun moveSelection(delta: Int): Boolean {
         if (visibleCards.isEmpty()) return false
+        if (entrySelected) {
+            if (delta <= 0) return false
+            select(visibleCards.first())
+            scrollToCard(visibleCards.first())
+            return true
+        }
         val index = visibleCards.indexOfFirst { it.nodeId == selectedNodeId }
+        if (index == 0 && delta < 0) {
+            // Above the first call is the entry, so the sequence has a natural top.
+            selectEntry()
+            return true
+        }
         val next = (if (index < 0) 0 else index + delta).coerceIn(0, visibleCards.lastIndex)
         if (next == index) return false
         select(visibleCards[next])
@@ -567,7 +605,16 @@ class FlowCanvas : JComponent() {
 
     private fun select(card: CardVM?) {
         selectedNodeId = card?.nodeId
+        entrySelected = false
         onSelectionChanged(card)
+        repaint()
+    }
+
+    /** Selects the entry frame; the details panel describes it like any element. */
+    private fun selectEntry() {
+        selectedNodeId = null
+        entrySelected = rootVM != null
+        onEntrySelected()
         repaint()
     }
 
@@ -635,6 +682,7 @@ class FlowCanvas : JComponent() {
     }
 
     companion object {
+        private const val SELECTION_RING_GAP = 3
         private val SOLID_STROKE = BasicStroke(1.4f)
         private val DASHED_STROKE = BasicStroke(
             1.4f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, floatArrayOf(4f, 4f), 0f,

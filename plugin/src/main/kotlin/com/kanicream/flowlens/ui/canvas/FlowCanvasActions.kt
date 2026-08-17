@@ -29,7 +29,12 @@ class FlowCanvasActions(private val canvas: FlowCanvas, parent: Disposable) {
 
     private val actions = listOf(
         canvasAction("flow.action.open.target", KeyEvent.VK_ENTER, 0) {
-            canvas.selectedCard()?.let(canvas.onNavigateToTarget)
+            val card = canvas.selectedCard()
+            if (card != null) {
+                canvas.onNavigateToTarget(card)
+            } else {
+                canvas.selectedEntry()?.let(canvas.onNavigateToFrameEntry)
+            }
         },
         canvasAction("flow.action.open.call.site", KeyEvent.VK_ENTER, InputEvent.SHIFT_DOWN_MASK) {
             canvas.selectedCard()?.let(canvas.onNavigateToCallSite)

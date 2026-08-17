@@ -8,7 +8,9 @@ import com.kanicream.flowlens.core.model.ExecutionMode
 import com.kanicream.flowlens.core.model.FlowLimits
 import com.kanicream.flowlens.core.model.FlowNodeKind
 import com.kanicream.flowlens.core.model.FlowResultStatus
+import com.kanicream.flowlens.core.model.FlowLocation
 import com.kanicream.flowlens.core.model.FlowSymbol
+import com.kanicream.flowlens.core.model.LocationId
 import com.kanicream.flowlens.core.model.NodeId
 import com.kanicream.flowlens.core.model.OrderingStatus
 import com.kanicream.flowlens.core.model.ResolutionStatus
@@ -125,6 +127,19 @@ class CanvasViewModelTest : BasePlatformTestCase() {
             control.x + control.width <= expandable.bounds.x + expandable.bounds.width,
         )
         assertTrue("a call with nothing inside has no control", leaf.expanderBounds.isEmpty)
+    }
+
+    fun `test the entry is a selectable element of its own`() {
+        // The user clicks the entry expecting it to behave like anything else on
+        // the canvas; before this it could only be double-clicked to navigate.
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val entry = FlowLocation(LocationId(9), "Sample.java", 12)
+        b.openRootFrame(symbol("purchase"), entry)
+        val vm = CanvasViewModelBuilder.build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!
+        assertTrue(vm.rendersHeader)
+        assertFalse("the entry header is a real hit target", vm.headerBounds.isEmpty)
+        assertEquals(entry, vm.entryLocation)
+        assertEquals(vm.frameId, vm.selectionKey)
     }
 
     fun `test collapsed calls stay plain cards`() {

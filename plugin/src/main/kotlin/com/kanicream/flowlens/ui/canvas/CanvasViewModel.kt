@@ -100,6 +100,13 @@ class FrameVM(
     val entryLocation: com.kanicream.flowlens.core.model.FlowLocation?,
     val cards: List<CardVM>,
 ) {
+    /**
+     * Identifies the entry for selection. The root is a frame rather than a call
+     * event, but the user still clicks it and expects it to behave like anything
+     * else on the canvas.
+     */
+    val selectionKey: FrameId get() = frameId
+
     var bounds: Rectangle = Rectangle()
 
     /**

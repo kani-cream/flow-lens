@@ -52,6 +52,9 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
         canvas.onNavigateToTarget = { card -> navigateTo(card.node.preferredNavigationLocation) }
         canvas.onNavigateToCallSite = { card -> navigateTo(card.node.callSiteLocation) }
         canvas.onNavigateToFrameEntry = { frame: FrameVM -> navigateTo(frame.entryLocation) }
+        // Selecting the entry clears the call details: the entry is a frame, not
+        // a call event, so there is no call-site or dispatch state to describe.
+        canvas.onEntrySelected = { selectionModel.select(null) }
         selectionModel.addListener { card: CardVM? -> detailsPanel.show(card?.node) }
         subscribe()
     }
