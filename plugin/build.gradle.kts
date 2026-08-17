@@ -70,6 +70,11 @@ tasks.test {
         "idea.load.plugins.id",
         "com.kanicream.flowlens,com.intellij.java,org.jetbrains.kotlin,org.jetbrains.plugins.go",
     )
+    // For OptionalDependencyIsolationTest: the compiled production classes to scan.
+    systemProperty(
+        "flowlens.classes.dir",
+        layout.buildDirectory.dir("classes/kotlin/main").get().asFile.absolutePath,
+    )
 }
 
 intellijPlatform {

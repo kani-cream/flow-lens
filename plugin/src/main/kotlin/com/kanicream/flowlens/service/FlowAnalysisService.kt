@@ -96,14 +96,16 @@ class FlowAnalysisService(
         return handles?.pointer(location)
     }
 
-    private fun acceptResult(event: FlowAnalysisResultEvent) {
+    /** Internal for lifecycle tests: events from a non-current run must be dropped. */
+    internal fun acceptResult(event: FlowAnalysisResultEvent) {
         synchronized(lock) {
             if (activeRunId != event.runId) return
             mutableResults.value = event.result
         }
     }
 
-    private fun acceptProgress(event: FlowProgress) {
+    /** Internal for lifecycle tests: events from a non-current run must be dropped. */
+    internal fun acceptProgress(event: FlowProgress) {
         synchronized(lock) {
             if (activeRunId != event.runId) return
             mutableProgress.value = event
