@@ -187,6 +187,14 @@ internal class FlowAnalysisRun(
             }
             throw e
         } catch (e: ProcessCanceledException) {
+            // A PCE escaping outside coroutine cancellation must still leave the run
+            // in a terminal state, or the UI would show a transient stage forever.
+            withContext(NonCancellable) {
+                builder?.let {
+                    publishResult(FlowAnalysisResultEvent(runId, it.snapshot(FlowResultStatus.CANCELLED)))
+                }
+                progress(FlowProgressStage.CANCELLED)
+            }
             throw e
         } catch (e: Throwable) {
             LOG.warn("Flow Lens run failed: ${e.javaClass.simpleName}", e)

@@ -18,6 +18,13 @@ data class FlowNode(
     val orderingStatus: OrderingStatus,
     val metadata: Map<String, String> = emptyMap(),
 ) {
+    /**
+     * Default navigation destination (V0.1_SPEC.md section 18): the resolved target
+     * declaration when known, otherwise the call site.
+     */
+    val preferredNavigationLocation: FlowLocation?
+        get() = targetLocation ?: callSiteLocation
+
     init {
         require(depth >= 0) { "depth must be >= 0" }
         if (targetFrameId != null) {

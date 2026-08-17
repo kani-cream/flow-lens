@@ -41,7 +41,7 @@ class FlowLensPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         border = JBUI.Borders.empty(4, 10)
     }
     private val detailsPanel = FlowDetailsPanel(
-        onOpenTarget = { card -> navigateTo(card.node.targetLocation ?: card.node.callSiteLocation) },
+        onOpenTarget = { card -> navigateTo(card.node.preferredNavigationLocation) },
         onOpenCallSite = { card -> navigateTo(card.node.callSiteLocation) },
     )
     private val jobs = mutableListOf<Job>()
@@ -59,9 +59,7 @@ class FlowLensPanel(private val project: Project) : JPanel(BorderLayout()), Disp
         add(detailsPanel, BorderLayout.SOUTH)
 
         canvas.onSelectionChanged = detailsPanel::showSelection
-        canvas.onNavigateToTarget = { card ->
-            navigateTo(card.node.targetLocation ?: card.node.callSiteLocation)
-        }
+        canvas.onNavigateToTarget = { card -> navigateTo(card.node.preferredNavigationLocation) }
         installCollectors()
     }
 
