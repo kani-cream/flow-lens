@@ -60,6 +60,10 @@ tasks.buildSearchableOptions {
     // The headless searchable-options build requires the IDE default (English)
     // locale; on a Japanese-locale machine it fails with "Locale must be default".
     jvmArgs("-Duser.language=en", "-Duser.country=US")
+    // It also launches a full headless IDE, which is one of the slowest steps in
+    // the build. Ordinary CI runs skip it to stay inside the Actions budget; the
+    // distribution job and local release builds still produce it.
+    onlyIf { !providers.gradleProperty("flowlens.ci").isPresent }
 }
 
 tasks.test {
