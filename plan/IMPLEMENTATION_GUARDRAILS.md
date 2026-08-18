@@ -517,6 +517,12 @@ instead of a conclusion. The account's free minutes ran out as a result.
 
 ### What actually costs minutes
 
+Since 2026-08-18 the repository is public, and standard runners are free for
+public repositories, so the budget that produced this section no longer binds.
+The discipline stays: a run still takes minutes of wall-clock time and reports
+on work that should already be known-good, and treating it as a debugger is how
+one fix becomes four runs.
+
 The workflow triggers on `pull_request` and `workflow_dispatch` only. There is
 no `push` trigger, and the build job is guarded by
 `github.event.pull_request.draft == false`.
@@ -525,7 +531,7 @@ no `push` trigger, and the build job is guarded by
 |---|---|
 | Pushing a branch with no open PR | no |
 | Opening or updating a **draft** PR | no — the job is skipped |
-| Marking a PR ready, or pushing to a ready PR | **yes** |
+| Marking a PR ready, or pushing to a ready PR | **yes** (billed while private) |
 | Merging | no |
 
 `paths-ignore` does not help once a PR contains code: for `pull_request` events

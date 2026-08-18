@@ -116,3 +116,14 @@ saved flows, recents, and analyze-from-here (v0.3).
 Plugin Verifier reports zero compatibility, deprecated, experimental, and
 internal API usages against both the minimum and latest supported builds.
 Verified in the sandbox IDE; checks in a production IDE are scheduled for v1.0.
+
+### About the history
+
+Development through v0.3 happened in a private repository, which this one
+replaces. The commits are the same, with authorship rewritten to a GitHub
+noreply address, so **`Merge pull request #1`–`#6` in the log refer to that
+predecessor and not to any pull request here.** Their review history stayed
+private with it; what was decided and verified is in the `plan/*_RESULTS.md`
+documents rather than in pull request threads.
+
+Pull request numbering here starts fresh.
