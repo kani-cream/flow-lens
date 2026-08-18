@@ -1,6 +1,8 @@
 package com.kanicream.flowlens.core.engine
 
+import com.kanicream.flowlens.core.model.BranchKind
 import com.kanicream.flowlens.core.model.DispatchConfidence
+import com.kanicream.flowlens.core.model.FlowBranch
 import com.kanicream.flowlens.core.model.ExecutionMode
 import com.kanicream.flowlens.core.model.FlowAnalysisResult
 import com.kanicream.flowlens.core.model.FlowDiagnostic
@@ -16,6 +18,16 @@ import com.kanicream.flowlens.core.model.NodeId
 import com.kanicream.flowlens.core.model.OrderingStatus
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.core.model.RunId
+
+/**
+ * A structural event under construction: its branches are filled in as the
+ * analyzer walks them, then sealed into an immutable [FlowNode].
+ */
+class StructureSpec(
+    val kind: FlowNodeKind,
+    val callSiteLocation: FlowLocation?,
+    val summary: String?,
+)
 
 /** Input for one ordinary semantic event. Depth is derived from the owning frame. */
 data class FlowEventSpec(
@@ -43,6 +55,7 @@ class FlowModelBuilder(
     private val sourceRevision: Long,
 ) {
     private val budget = NodeBudget(limits.maxNodes)
+    private val openStructures = mutableListOf<StructureHandle>()
     private val frames = LinkedHashMap<FrameId, MutableFrame>()
     private val diagnostics = mutableListOf<FlowDiagnostic>()
     private var rootFrameId: FrameId? = null
@@ -76,17 +89,107 @@ class FlowModelBuilder(
         entryLocation: FlowLocation?,
     ): FrameId {
         val parent = frames.getValue(ownerFrame)
-        val index = parent.events.indexOfFirst { it.id == ownerNode }
-        check(index >= 0) { "node $ownerNode not found in frame $ownerFrame" }
         val childId = newFrame(symbol, entryLocation, depth = parent.depth + 1)
-        parent.events[index] = parent.events[index].copy(targetFrameId = childId)
+        val linked = linkChildFrame(ownerFrame, ownerNode, childId)
+        check(linked) { "node $ownerNode not found in frame $ownerFrame" }
         return childId
+    }
+
+    /**
+     * Points the owning call at its analyzed body. The call may sit directly in
+     * the frame, inside a branch that is still being collected, or inside one
+     * that is already sealed, so all three are searched.
+     */
+    private fun linkChildFrame(frameId: FrameId, nodeId: NodeId, childId: FrameId): Boolean {
+        for (structure in openStructures.asReversed()) {
+            if (structure.frameId == frameId && structure.link(nodeId, childId)) return true
+        }
+        val frame = frames.getValue(frameId)
+        val index = frame.events.indexOfFirst { it.id == nodeId }
+        if (index >= 0) {
+            frame.events[index] = frame.events[index].copy(targetFrameId = childId)
+            return true
+        }
+        val updated = frame.events.map { linkWithin(it, nodeId, childId) }
+        if (updated != frame.events.toList()) {
+            frame.events.clear()
+            frame.events += updated
+            return true
+        }
+        return false
+    }
+
+    /** Rebuilds [node] with the child frame attached somewhere in its branches. */
+    private fun linkWithin(node: FlowNode, nodeId: NodeId, childId: FrameId): FlowNode {
+        if (node.branches.isEmpty()) return node
+        return node.copy(
+            branches = node.branches.map { branch ->
+                branch.copy(
+                    events = branch.events.map { event ->
+                        when {
+                            event.id == nodeId -> event.copy(targetFrameId = childId)
+                            else -> linkWithin(event, nodeId, childId)
+                        }
+                    },
+                )
+            },
+        )
     }
 
     /** Adds one ordinary semantic event. Returns null when only the reserved limit slot remains. */
     fun addEvent(frameId: FrameId, spec: FlowEventSpec): NodeId? {
         if (!budget.tryClaimOrdinary()) return null
         return appendNode(frameId, spec)
+    }
+
+    /**
+     * Opens a structural event — a condition, switch, loop, or try — in
+     * [frameId]. Its branches are collected through [openBranch] and the whole
+     * structure is sealed by [closeStructure].
+     *
+     * A structure claims a node slot like any other persistent semantic node
+     * (`PLAN.md` §11); returns null when only the reserved limit slot remains.
+     */
+    fun openStructure(frameId: FrameId, spec: StructureSpec): StructureHandle? {
+        if (!budget.tryClaimOrdinary()) return null
+        val handle = StructureHandle(NodeId(nextNodeId++), frameId, spec)
+        openStructures += handle
+        return handle
+    }
+
+    /** Starts collecting a labelled section of an open structure. */
+    fun openBranch(structure: StructureHandle, kind: BranchKind, label: String?) {
+        structure.openBranch(kind, label)
+    }
+
+    /** Finishes the current section of an open structure. */
+    fun closeBranch(structure: StructureHandle) {
+        structure.closeBranch()
+    }
+
+    /**
+     * Seals a structure and appends it to its frame, or to the enclosing
+     * structure's current branch when structures nest.
+     */
+    fun closeStructure(structure: StructureHandle) {
+        structure.closeBranch()
+        openStructures.remove(structure)
+        val node = FlowNode(
+            id = structure.id,
+            kind = structure.spec.kind,
+            callSiteLocation = structure.spec.callSiteLocation,
+            targetSymbol = null,
+            targetLocation = null,
+            targetFrameId = null,
+            depth = frames.getValue(structure.frameId).depth,
+            resolutionStatus = null,
+            dispatchConfidence = null,
+            executionMode = ExecutionMode.SYNC,
+            orderingStatus = OrderingStatus.DETERMINISTIC,
+            branches = structure.branches(),
+            structureSummary = structure.spec.summary,
+        )
+        emit(structure.frameId, node)
     }
 
     /** Adds the single LIMIT marker into [frameId] using the reserved budget slot. */
@@ -115,6 +218,17 @@ class FlowModelBuilder(
         diagnostics += diagnostic
     }
 
+    /**
+     * Seals every structure still being collected, innermost first. Traversal
+     * can stop inside a branch — the node budget runs out, or the run is
+     * cancelled — and a snapshot must still contain what was found there.
+     */
+    fun closeOpenStructures() {
+        while (openStructures.isNotEmpty()) {
+            closeStructure(openStructures.last())
+        }
+    }
+
     fun snapshot(status: FlowResultStatus): FlowAnalysisResult =
         FlowAnalysisResult(
             runId = runId,
@@ -134,23 +248,84 @@ class FlowModelBuilder(
     }
 
     private fun appendNode(frameId: FrameId, spec: FlowEventSpec): NodeId {
-        val frame = frames.getValue(frameId)
         val id = NodeId(nextNodeId++)
-        frame.events += FlowNode(
-            id = id,
-            kind = spec.kind,
-            callSiteLocation = spec.callSiteLocation,
-            targetSymbol = spec.targetSymbol,
-            targetLocation = spec.targetLocation,
-            targetFrameId = null,
-            depth = frame.depth,
-            resolutionStatus = spec.resolutionStatus,
-            dispatchConfidence = spec.dispatchConfidence,
-            executionMode = spec.executionMode,
-            orderingStatus = spec.orderingStatus,
-            metadata = spec.metadata,
+        emit(
+            frameId,
+            FlowNode(
+                id = id,
+                kind = spec.kind,
+                callSiteLocation = spec.callSiteLocation,
+                targetSymbol = spec.targetSymbol,
+                targetLocation = spec.targetLocation,
+                targetFrameId = null,
+                depth = frames.getValue(frameId).depth,
+                resolutionStatus = spec.resolutionStatus,
+                dispatchConfidence = spec.dispatchConfidence,
+                executionMode = spec.executionMode,
+                orderingStatus = spec.orderingStatus,
+                metadata = spec.metadata,
+            ),
         )
         return id
+    }
+
+    /**
+     * Places a finished event where the traversal currently is: inside the
+     * innermost open branch of this frame, or in the frame itself.
+     */
+    private fun emit(frameId: FrameId, node: FlowNode) {
+        val enclosing = openStructures.lastOrNull { it.frameId == frameId && it.hasOpenBranch }
+        if (enclosing != null) {
+            enclosing.add(node)
+        } else {
+            frames.getValue(frameId).events += node
+        }
+    }
+
+    /**
+     * A structure being built. Events emitted while one of its branches is open
+     * land in that branch instead of the frame's top-level sequence.
+     */
+    class StructureHandle internal constructor(
+        internal val id: NodeId,
+        internal val frameId: FrameId,
+        internal val spec: StructureSpec,
+    ) {
+        private val completed = mutableListOf<FlowBranch>()
+        private var currentKind: BranchKind? = null
+        private var currentLabel: String? = null
+        private var currentEvents = mutableListOf<FlowNode>()
+
+        internal val hasOpenBranch: Boolean get() = currentKind != null
+
+        internal fun openBranch(kind: BranchKind, label: String?) {
+            closeBranch()
+            currentKind = kind
+            currentLabel = label
+            currentEvents = mutableListOf()
+        }
+
+        internal fun closeBranch() {
+            val kind = currentKind ?: return
+            completed += FlowBranch(kind, currentLabel, currentEvents.toList())
+            currentKind = null
+            currentLabel = null
+            currentEvents = mutableListOf()
+        }
+
+        internal fun add(node: FlowNode) {
+            currentEvents += node
+        }
+
+        internal fun branches(): List<FlowBranch> = completed.toList()
+
+        /** Attaches a child frame to a call collected in the open branch. */
+        internal fun link(nodeId: NodeId, childId: FrameId): Boolean {
+            val index = currentEvents.indexOfFirst { it.id == nodeId }
+            if (index < 0) return false
+            currentEvents[index] = currentEvents[index].copy(targetFrameId = childId)
+            return true
+        }
     }
 
     private class MutableFrame(
