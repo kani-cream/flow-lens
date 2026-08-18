@@ -1,6 +1,7 @@
 package com.kanicream.flowlens.analysis
 
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.GeneratedSourcesFilter
 import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.psi.PsiCompiledElement
 import com.intellij.psi.PsiElement
@@ -46,6 +47,12 @@ object PsiClassification {
         val index = ProjectFileIndex.getInstance(project)
         return when {
             index.isInLibrary(file) -> SourceOrigin.LIBRARY
+            // A generated source is a physical file inside the project, so it
+            // would otherwise be indistinguishable from code someone wrote — and
+            // TraversalPolicy would recurse into it, against the contract that
+            // generated declarations are not followed as authored code.
+            GeneratedSourcesFilter.isGeneratedSourceByAnyFilter(file, project) ->
+                SourceOrigin.GENERATED
             index.isInContent(file) -> SourceOrigin.PHYSICAL_SOURCE
             else -> SourceOrigin.UNKNOWN
         }

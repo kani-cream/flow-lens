@@ -361,7 +361,10 @@ parameter type breaks the identity even when the code is otherwise unchanged.
 Pinning `charge()` marks every card whose target is `charge()`, in every flow.
 There is no way to mark one call to it and not another.
 
-Pins are project-scoped and not shareable in v0.3.
+Pins are project-scoped. They are stored in a project-level file, so a team
+that commits it will share the file's contents, but v0.3 provides no way to
+export, merge, or reconcile entries between people, and no handling of two
+developers editing the list. Sharing as a feature is v0.4.
 
 ---
 
@@ -382,7 +385,21 @@ recorded, so the list describes finished work only.
 
 ---
 
-## 33. Maintenance rule
+## 33. Symbol keys changed in v0.3 hardening
+
+A symbol key now includes enough of the file's location to be unique within the
+project: a Go function is keyed by its directory rather than its package name,
+because two directories can both be `package main`, and a Java or Kotlin
+declaration with no qualified name falls back to the project-relative file path
+rather than the bare file name.
+
+Pins and saved flows stored before that change do not match the new keys. They
+are reported as not found, which is the same behavior as any other stale entry,
+and can be deleted and re-created.
+
+---
+
+## 34. Maintenance rule
 
 Whenever dogfooding, fixture testing, Plugin Verifier, or a user report reveals a surprising but currently accepted behavior:
 

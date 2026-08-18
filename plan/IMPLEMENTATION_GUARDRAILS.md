@@ -510,9 +510,49 @@ Before a push that triggers CI:
    An up-to-date task reports success without running anything.
 4. **Review before pushing**, not in parallel with CI.
 
-v0.3 spent four runs on one test. The second and third found real product bugs,
-so the runs were not wasted — but they were only needed because the first fix
-was pushed as a hypothesis instead of a conclusion.
+v0.3 spent four runs on one test, plus one more on a documentation-only push.
+The second and third found real product bugs, so those runs were not wasted —
+but they were only needed because the first fix was pushed as a hypothesis
+instead of a conclusion. The account's free minutes ran out as a result.
+
+### What actually costs minutes
+
+The workflow triggers on `pull_request` and `workflow_dispatch` only. There is
+no `push` trigger, and the build job is guarded by
+`github.event.pull_request.draft == false`.
+
+| Action | Billed |
+|---|---|
+| Pushing a branch with no open PR | no |
+| Opening or updating a **draft** PR | no — the job is skipped |
+| Marking a PR ready, or pushing to a ready PR | **yes** |
+| Merging | no |
+
+`paths-ignore` does not help once a PR contains code: for `pull_request` events
+the filter is evaluated against the whole PR diff, not the push. A
+documentation-only commit to an open, ready PR runs the full build. Keep a PR in
+draft until the work is finished, then mark it ready once.
+
+### The local gate
+
+Everything CI checks can be checked locally, and must be before a push that
+bills:
+
+```text
+./gradlew build --rerun-tasks                    # 360 tests from scratch
+./gradlew test -Pflowlens.isolate=true           # one JVM per class
+./gradlew verifyPlugin buildPlugin               # both target builds, ZIP
+```
+
+`-Pflowlens.isolate=true` forks a JVM per test class. The light fixture shares
+one project across a whole run, so a suite can read state another suite left
+behind and pass for the wrong reason. That is the class of defect a hosted
+runner found twice; isolation makes it reproducible here instead.
+
+What a hosted runner still adds is different timing on different hardware, which
+is how the two Stop races surfaced. Repeated local runs reduce but do not remove
+that gap — which is a reason to spend a run at a milestone boundary, not a reason
+to spend one per fix.
 
 ---
 

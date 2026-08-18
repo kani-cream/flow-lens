@@ -134,9 +134,9 @@ class FlowEntryPersistenceTest : LightJavaCodeInsightFixtureTestCase() {
         val flows = FlowLensFlows.getInstance(project)
 
         assertTrue(flows.togglePin(ref))
-        assertTrue(flows.isPinned(ref.key))
+        assertTrue(flows.isPinned(ref))
         assertFalse(flows.togglePin(ref))
-        assertFalse(flows.isPinned(ref.key))
+        assertFalse(flows.isPinned(ref))
         assertTrue(flows.pins().isEmpty())
     }
 
@@ -224,7 +224,7 @@ class FlowEntryPersistenceTest : LightJavaCodeInsightFixtureTestCase() {
 
         assertTrue(flows.pins().isEmpty())
         assertTrue(flows.savedFlows().isEmpty())
-        assertFalse(flows.isPinned("anything"))
+        assertFalse(flows.isPinned(FlowEntryRef("k", "java", "d", null, "p.java")))
     }
 
     fun `test T a malformed stored entry is dropped rather than failing`() {

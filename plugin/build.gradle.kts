@@ -86,6 +86,16 @@ tasks.test {
     // headless-unsafe UI call fails on the developer machine that introduced it
     // rather than on the hosted runner minutes later.
     systemProperty("java.awt.headless", "true")
+
+    // -Pflowlens.isolate=true gives each test class its own JVM. The light
+    // fixture shares one project across a whole run, so a suite can read state
+    // another suite left behind and pass for the wrong reason — twice now, a
+    // suite that was green locally failed on a hosted runner for exactly that.
+    // Isolation makes that class of defect reproducible on a developer machine
+    // instead of costing a CI run to discover.
+    if (providers.gradleProperty("flowlens.isolate").orNull == "true") {
+        forkEvery = 1
+    }
 }
 
 intellijPlatform {

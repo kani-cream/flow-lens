@@ -37,6 +37,7 @@ import com.kanicream.flowlens.analysis.SourceSummary
 import com.kanicream.flowlens.analysis.FlowLanguageAnalyzer
 import com.kanicream.flowlens.analysis.PsiClassification
 import com.kanicream.flowlens.analysis.ResolvedCallTarget
+import com.kanicream.flowlens.analysis.SymbolQualifier
 import com.kanicream.flowlens.analysis.TargetClassifier
 import com.kanicream.flowlens.core.model.BranchKind
 import com.kanicream.flowlens.core.model.DispatchConfidence
@@ -133,11 +134,16 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
             ?.receiverType?.text?.removePrefix("*")
         val packageName = (declaration.containingFile as? GoFile)?.packageName
         val display = if (receiver.isNullOrEmpty()) "$name()" else "$receiver.$name()"
+        // Two directories can both be `package main`, and the package name alone
+        // then gives their functions one key. That key is what cycle detection
+        // compares along a path, so two unrelated `run()` would read as a cycle.
+        // A Go package is its directory, so the directory is the unique part.
+        val qualifier = SymbolQualifier.directoryQualifier(declaration) ?: packageName ?: "?"
         return FlowSymbol(
             languageId = languageId,
             displayName = display,
             containerName = packageName,
-            key = "go:${packageName ?: "?"}.${receiver?.plus(".") ?: ""}$name",
+            key = "go:$qualifier.${receiver?.plus(".") ?: ""}$name",
         )
     }
 

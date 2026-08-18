@@ -27,6 +27,9 @@ class EntryState {
         return FlowEntryRef(key, language, display, containerName, path)
     }
 
+    /** Null when the entry is unreadable, so it can never match a live one. */
+    val id: String? get() = toRef()?.id
+
     companion object {
         fun of(ref: FlowEntryRef): EntryState = EntryState().apply {
             key = ref.key
@@ -52,7 +55,12 @@ class SavedFlowState {
 data class SavedFlow(val name: String, val entry: FlowEntryRef, val limits: FlowLimits)
 
 /**
- * Pins and saved flows, project-scoped and shared (`V0.3_SPEC.md` §9).
+ * Pins and saved flows, in a project-level file (`V0.3_SPEC.md` §9).
+ *
+ * "Project-level" means the file lives with the project rather than with the
+ * user, so it can be committed if a team chooses to. v0.3 offers no way to
+ * export, merge, or reconcile these entries between people — that is v0.4 —
+ * which is what `KNOWN_LIMITATIONS.md` §30 means by "not shareable".
  *
  * Nothing here stores an analysis result. A result describes one source
  * revision and is stale as soon as the file changes, so opening a saved flow
@@ -86,7 +94,8 @@ class FlowLensFlows : PersistentStateComponent<FlowLensFlows.State> {
 
     fun pins(): List<FlowEntryRef> = synchronized(lock) { state.pins.toList() }.mapNotNull(EntryState::toRef)
 
-    fun isPinned(key: String): Boolean = synchronized(lock) { state.pins.any { it.key == key } }
+    /** By entry identity, not by key: see [FlowEntryRef.id]. */
+    fun isPinned(ref: FlowEntryRef): Boolean = synchronized(lock) { state.pins.any { it.id == ref.id } }
 
     /** Pinned keys, for the canvas to mark cards without a lookup per card. */
     fun pinnedKeys(): Set<String> = synchronized(lock) { state.pins.mapNotNull { it.key }.toSet() }
@@ -94,9 +103,9 @@ class FlowLensFlows : PersistentStateComponent<FlowLensFlows.State> {
     /** Pins [ref], or unpins it when it is already pinned (`V0.3_SPEC.md` §4.6). */
     fun togglePin(ref: FlowEntryRef): Boolean {
         val pinned = synchronized(lock) {
-            val was = state.pins.any { it.key == ref.key }
+            val was = state.pins.any { it.id == ref.id }
             state.pins = if (was) {
-                state.pins.filterNot { it.key == ref.key }.toMutableList()
+                state.pins.filterNot { it.id == ref.id }.toMutableList()
             } else {
                 (state.pins + EntryState.of(ref)).toMutableList()
             }
@@ -106,8 +115,8 @@ class FlowLensFlows : PersistentStateComponent<FlowLensFlows.State> {
         return !pinned
     }
 
-    fun removePin(key: String) {
-        synchronized(lock) { state.pins = state.pins.filterNot { it.key == key }.toMutableList() }
+    fun removePin(ref: FlowEntryRef) {
+        synchronized(lock) { state.pins = state.pins.filterNot { it.id == ref.id }.toMutableList() }
         onChanged()
     }
 
@@ -138,13 +147,13 @@ class FlowLensFlows : PersistentStateComponent<FlowLensFlows.State> {
             includeLibraries = limits.includeLibraries
         }
         synchronized(lock) {
-            state.saved = (state.saved.filterNot { it.entry?.key == ref.key } + entry).toMutableList()
+            state.saved = (state.saved.filterNot { it.entry?.id == ref.id } + entry).toMutableList()
         }
         onChanged()
     }
 
-    fun removeSaved(key: String) {
-        synchronized(lock) { state.saved = state.saved.filterNot { it.entry?.key == key }.toMutableList() }
+    fun removeSaved(ref: FlowEntryRef) {
+        synchronized(lock) { state.saved = state.saved.filterNot { it.entry?.id == ref.id }.toMutableList() }
         onChanged()
     }
 

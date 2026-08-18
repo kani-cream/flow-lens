@@ -46,6 +46,7 @@ import com.kanicream.flowlens.analysis.ExtractedTerminator
 import com.kanicream.flowlens.analysis.FlowItem
 import com.kanicream.flowlens.analysis.SourceSummary
 import com.kanicream.flowlens.analysis.FlowLanguageAnalyzer
+import com.kanicream.flowlens.analysis.SymbolQualifier
 import com.kanicream.flowlens.analysis.TargetClassifier
 import com.kanicream.flowlens.analysis.ResolvedCallTarget
 import com.kanicream.flowlens.core.model.BranchKind
@@ -173,7 +174,9 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
     private fun symbolOf(method: PsiMethod): FlowSymbol {
         val container = method.containingClass
         val params = method.parameterList.parameters.joinToString(",") { it.type.canonicalText }
-        val qualifier = container?.qualifiedName ?: container?.name ?: method.containingFile?.name ?: "?"
+        // A bare file name repeats across packages, and an anonymous class has
+        // no qualified name at all, so the fallback is the project-relative path.
+        val qualifier = container?.qualifiedName ?: SymbolQualifier.fileQualifier(method)
         return FlowSymbol(
             languageId = languageId,
             displayName = "${method.name}()",

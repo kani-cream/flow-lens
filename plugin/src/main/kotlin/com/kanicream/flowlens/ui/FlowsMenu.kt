@@ -50,7 +50,7 @@ class FlowsMenu(
         // each time the menu opens (guardrails §6). The expensive check happens on
         // activation, for the one entry the user chose.
         val present = (saved.map { it.entry } + pins + recent.map { it.entry })
-            .associate { entryKey(it) to FlowEntryResolver.fileExists(project, it) }
+            .associate { it.id to FlowEntryResolver.fileExists(project, it) }
 
         return DefaultActionGroup().apply {
             add(SaveCurrentAction())
@@ -99,7 +99,7 @@ class FlowsMenu(
         private val limits: FlowLimits?,
         present: Map<String, Boolean>,
     ) : AnAction(
-        if (present[entryKey(ref)] == true) {
+        if (present[ref.id] == true) {
             label(name, ref)
         } else {
             FlowLensBundle.message("flows.entry.unresolved", label(name, ref))
@@ -107,7 +107,7 @@ class FlowsMenu(
         null,
         null,
     ), DumbAware {
-        private val found = present[entryKey(ref)] == true
+        private val found = present[ref.id] == true
 
         override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
 
@@ -123,8 +123,5 @@ class FlowsMenu(
     private companion object {
         fun label(name: String, ref: FlowEntryRef): String =
             ref.containerName?.let { "$name  —  $it" } ?: name
-
-        /** Two entries can share a key and differ by file; they are not the same row. */
-        fun entryKey(ref: FlowEntryRef): String = "${ref.path}::${ref.key}"
     }
 }
