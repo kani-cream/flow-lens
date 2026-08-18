@@ -21,6 +21,7 @@ import com.goide.psi.GoMethodDeclaration
 import com.goide.psi.GoMethodSpec
 import com.goide.psi.GoReferenceExpression
 import com.goide.psi.GoSelectStatement
+import com.goide.psi.GoStatement
 import com.goide.psi.GoSwitchStatement
 import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiElement
@@ -186,7 +187,16 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                 is GoSelectStatement -> walkSwitch(element, isSelect = true)
                 is GoReturnStatement -> {
                     element.expressionList.forEach(::walk)
-                    sink += ExtractedTerminator(FlowNodeKind.RETURN, element)
+                    // Go returns several values at once, so the card lists them.
+                    sink += ExtractedTerminator(
+                        FlowNodeKind.RETURN,
+                        element,
+                        SourceSummary.of(
+                            element.expressionList
+                                .joinToString(", ") { it.text }
+                                .ifEmpty { null },
+                        ),
+                    )
                 }
                 is GoBreakStatement -> {
                     // A `break` that leaves a switch or select case is already
@@ -302,8 +312,14 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
             else -> null
         }?.trim()?.ifEmpty { null }
 
+        /**
+         * What the switch decides on. An init statement is left out: it runs once
+         * before the container and is already drawn as its own card there, so
+         * repeating it in the title would say the same thing twice. Java and
+         * Kotlin name only the subject for the same reason.
+         */
         private fun switchSubjectOf(element: PsiElement): String? = element.children
-            .filterNot { it is GoCaseClause }
+            .filterNot { it is GoCaseClause || it is GoStatement }
             .joinToString(" ") { it.text }
             .trim()
             .removePrefix("switch")

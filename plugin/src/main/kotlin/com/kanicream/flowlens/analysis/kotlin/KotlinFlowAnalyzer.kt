@@ -285,11 +285,19 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                 is KtTryExpression -> walkTry(element)
                 is KtReturnExpression -> {
                     element.returnedExpression?.let(::walk)
-                    sink += ExtractedTerminator(FlowNodeKind.RETURN, element)
+                    sink += ExtractedTerminator(
+                        FlowNodeKind.RETURN,
+                        element,
+                        SourceSummary.of(element.returnedExpression?.text),
+                    )
                 }
                 is KtThrowExpression -> {
                     element.thrownExpression?.let(::walk)
-                    sink += ExtractedTerminator(FlowNodeKind.THROW, element)
+                    sink += ExtractedTerminator(
+                        FlowNodeKind.THROW,
+                        element,
+                        SourceSummary.of(element.thrownExpression?.text),
+                    )
                 }
                 is KtBreakExpression, is KtContinueExpression -> controlFlowSimplified = true
                 is KtSafeQualifiedExpression -> {

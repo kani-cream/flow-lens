@@ -12,6 +12,7 @@ import com.kanicream.flowlens.core.model.FlowResultStatus
 import com.kanicream.flowlens.FlowLensBundle
 import com.kanicream.flowlens.testutil.RealJdkProjectDescriptor
 import com.kanicream.flowlens.ui.canvas.CanvasViewModelBuilder
+import com.kanicream.flowlens.ui.details.FlowDetailsModel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -187,6 +188,49 @@ class V02AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
         assertNull(
             "the section already says the call may be skipped",
             call.metadata[FlowMetadata.CONDITIONAL],
+        )
+    }
+
+    fun `test I a return says what it hands back`() {
+        val result = analyze(
+            "I.java",
+            """
+            public class I {
+                void run(boolean flag) {
+                    if (flag) { return; }
+                    record(total());
+                }
+                int total() { return 1; }
+                void record(int v) { }
+            }
+            """.trimIndent(),
+            "void run(boolean flag)",
+        )
+        val cards = CanvasViewModelBuilder.build(result, emptySet())!!.cards
+        val bare = cards.first { it.isStructure }.sections.single().cards.single()
+        val kind = FlowLensBundle.message("card.kind.RETURN")
+        assertEquals("nothing is handed back, so the card says only that", kind, bare.title)
+    }
+
+    fun `test a valued return is distinguishable from a bare one`() {
+        val result = analyze(
+            "Valued.java",
+            """
+            public class Valued {
+                int run() { return total(); }
+                int total() { return 1; }
+            }
+            """.trimIndent(),
+            "int run()",
+        )
+        val card = CanvasViewModelBuilder.build(result, emptySet())!!.cards.last()
+        val kind = FlowLensBundle.message("card.kind.RETURN")
+        assertEquals("$kind total()", card.title)
+        assertFalse("a valued return must not read like a bare one", card.title == kind)
+        assertEquals(
+            "the details panel agrees with the card",
+            "${FlowLensBundle.message("enum.kind.RETURN")} total()",
+            FlowDetailsModel.stateOf(card.node).title,
         )
     }
 

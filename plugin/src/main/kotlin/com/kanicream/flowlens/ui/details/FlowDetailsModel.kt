@@ -35,13 +35,22 @@ object FlowDetailsModel {
             )
         }
         return FlowDetailsViewState(
-            title = node.targetSymbol?.displayName
-                ?: FlowLensBundle.message("enum.kind.${node.kind.name}"),
+            title = node.targetSymbol?.displayName ?: kindTitleOf(node),
             subtitle = node.targetSymbol?.containerName,
             rows = rowsOf(node),
             openTargetEnabled = node.targetLocation != null,
             openCallSiteEnabled = node.callSiteLocation != null,
         )
+    }
+
+    /**
+     * An event with no target names its kind, and adds what it acts on when the
+     * source says: the condition of a branch, the expression a `return` hands
+     * back. Without it every terminator reads the same.
+     */
+    private fun kindTitleOf(node: FlowNode): String {
+        val kind = FlowLensBundle.message("enum.kind.${node.kind.name}")
+        return node.sourceSummary?.let { "$kind $it" } ?: kind
     }
 
     private fun rowsOf(node: FlowNode): List<DetailRow> = buildList {

@@ -60,7 +60,7 @@ class FlowStructureBuilderTest {
 
         val structure = events[1]
         assertTrue(structure.isStructure)
-        assertEquals("flag", structure.structureSummary)
+        assertEquals("flag", structure.sourceSummary)
         assertEquals(listOf(BranchKind.THEN, BranchKind.ELSE), structure.branches.map { it.kind })
         assertEquals(listOf("charge()"), names(structure.branches[0].events))
         assertEquals(listOf("skip()"), names(structure.branches[1].events))

@@ -42,6 +42,11 @@ data class FlowEventSpec(
     val executionMode: ExecutionMode = ExecutionMode.SYNC,
     val orderingStatus: OrderingStatus = OrderingStatus.DETERMINISTIC,
     val metadata: Map<String, String> = emptyMap(),
+    /**
+     * Short source-derived text for display, used by terminators to say what a
+     * `return` hands back. A call needs none: its target names it.
+     */
+    val sourceSummary: String? = null,
 )
 
 /**
@@ -189,7 +194,7 @@ class FlowModelBuilder(
             executionMode = ExecutionMode.SYNC,
             orderingStatus = OrderingStatus.DETERMINISTIC,
             branches = structure.branches(),
-            structureSummary = structure.spec.summary,
+            sourceSummary = structure.spec.summary,
             metadata = structure.spec.metadata,
         )
         emit(structure.frameId, node)
@@ -267,6 +272,7 @@ class FlowModelBuilder(
                 executionMode = spec.executionMode,
                 orderingStatus = spec.orderingStatus,
                 metadata = spec.metadata,
+                sourceSummary = spec.sourceSummary,
             ),
         )
         return id

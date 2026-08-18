@@ -4,6 +4,9 @@ import com.intellij.ui.JBColor
 import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.keymap.KeymapUtil
 import com.kanicream.flowlens.FlowLensBundle
 import com.kanicream.flowlens.analysis.FlowAnalyzerCapabilities
 import com.kanicream.flowlens.core.model.FlowAnalysisResult
@@ -41,9 +44,10 @@ import kotlin.math.roundToInt
 class FlowCanvas : JComponent() {
 
     var onSelectionChanged: (CardVM?) -> Unit = {}
-    var onNavigateToTarget: (CardVM) -> Unit = {}
-    var onNavigateToCallSite: (CardVM) -> Unit = {}
-    var onNavigateToFrameEntry: (FrameVM) -> Unit = {}
+    /** (card, takeFocus): false shows the code, true hands the keyboard over. */
+    var onNavigateToTarget: (CardVM, Boolean) -> Unit = { _, _ -> }
+    var onNavigateToCallSite: (CardVM, Boolean) -> Unit = { _, _ -> }
+    var onNavigateToFrameEntry: (FrameVM, Boolean) -> Unit = { _, _ -> }
     var onContextMenu: (Point) -> Unit = {}
     var onEntrySelected: () -> Unit = {}
 
@@ -238,9 +242,26 @@ class FlowCanvas : JComponent() {
         // The keyboard contract is easiest to learn before there is anything to
         // read on the canvas; it disappears as soon as a flow is drawn.
         y += small.height + 12
-        val keys = FlowLensBundle.message("toolwindow.key.hints")
+        // The jump shortcut differs by platform and keymap, so the hint asks the
+        // IDE what it currently is rather than naming a key that may belong to
+        // the OS — F4 opens Spotlight on macOS.
+        val jump = jumpToSourceShortcutText()
+        val keys = if (jump == null) {
+            // Nothing is bound to Jump to Source, so the hint says nothing about it
+            // rather than naming a key that would do nothing.
+            FlowLensBundle.message("toolwindow.key.hints.no.jump")
+        } else {
+            FlowLensBundle.message("toolwindow.key.hints", jump)
+        }
         g2.color = Palette.mutedText
         g2.drawString(keys, max(12, (width - small.stringWidth(keys)) / 2), y)
+    }
+
+    /** The current Jump to Source binding, or null when the keymap has none. */
+    private fun jumpToSourceShortcutText(): String? {
+        val action = ActionManager.getInstance().getAction(IdeActions.ACTION_EDIT_SOURCE)
+            ?: return null
+        return KeymapUtil.getFirstKeyboardShortcutText(action).ifEmpty { null }
     }
 
     /** Only the root frame draws a container of its own; calls own their bodies. */
@@ -539,13 +560,13 @@ class FlowCanvas : JComponent() {
                 }
                 if (card == null && frameHeaderAt(e.point) != null) {
                     selectEntry()
-                    if (e.clickCount == 2) rootVM?.let(onNavigateToFrameEntry)
+                    if (e.clickCount == 2) rootVM?.let { onNavigateToFrameEntry(it, false) }
                     return
                 }
                 select(card)
                 if (card == null) return
                 if (e.clickCount == 2) {
-                    onNavigateToTarget(card)
+                    onNavigateToTarget(card, false)
                 } else if (card.expandable && card.expanderBounds.contains(toLogical(e.point))) {
                     toggleExpansion(card)
                 }
@@ -607,13 +628,19 @@ class FlowCanvas : JComponent() {
             override fun keyPressed(e: KeyEvent) {
                 // Only consume keys that actually did something, so unused arrows
                 // still reach the scroll pane and pan a wide flow.
+                // A modified arrow belongs to whoever bound it — Jump to Source is
+                // Cmd+Down on macOS — and a KeyListener runs before the registered
+                // shortcuts, so consuming one here would swallow that command.
+                val plainArrow = !e.isMetaDown && !e.isControlDown && !e.isAltDown && !e.isShiftDown
                 val handled = when {
-                    e.keyCode == KeyEvent.VK_DOWN -> moveSelection(1)
-                    e.keyCode == KeyEvent.VK_UP -> moveSelection(-1)
+                    e.keyCode == KeyEvent.VK_DOWN && plainArrow -> moveSelection(1)
+                    e.keyCode == KeyEvent.VK_UP && plainArrow -> moveSelection(-1)
                     // Enter, Shift+Enter, Space, and the zoom keys are registered
                     // actions so they appear in the keymap and the context menu.
-                    e.keyCode == KeyEvent.VK_RIGHT -> selectedCard()?.let(::expand) == true
-                    e.keyCode == KeyEvent.VK_LEFT -> selectedCard()?.let(::collapse) == true
+                    e.keyCode == KeyEvent.VK_RIGHT && plainArrow ->
+                        selectedCard()?.let(::expand) == true
+                    e.keyCode == KeyEvent.VK_LEFT && plainArrow ->
+                        selectedCard()?.let(::collapse) == true
                     isZoomShortcut(e) && e.keyCode == KeyEvent.VK_0 -> {
                         resetZoom()
                         true

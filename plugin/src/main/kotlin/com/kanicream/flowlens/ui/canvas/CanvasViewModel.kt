@@ -339,8 +339,12 @@ object CanvasViewModelBuilder {
     private fun titleOf(node: FlowNode, ownerType: String?): String = when (node.kind) {
         FlowNodeKind.CONDITION, FlowNodeKind.SWITCH, FlowNodeKind.LOOP, FlowNodeKind.TRY ->
             structureTitleOf(node)
-        FlowNodeKind.RETURN, FlowNodeKind.THROW ->
-            FlowLensBundle.message("card.kind.${node.kind.name}")
+        FlowNodeKind.RETURN, FlowNodeKind.THROW -> {
+            // `return;` and `return total();` stop the path for different
+            // reasons, so the card says which.
+            val kind = FlowLensBundle.message("card.kind.${node.kind.name}")
+            node.sourceSummary?.let { "$kind $it" } ?: kind
+        }
         FlowNodeKind.LIMIT -> FlowLensBundle.message("card.limit.node")
         FlowNodeKind.CYCLE -> FlowLensBundle.message(
             "card.cycle.label", node.targetSymbol?.displayName ?: "?",
@@ -368,7 +372,7 @@ object CanvasViewModelBuilder {
             else -> "card.kind.${node.kind.name}"
         }
         val kind = FlowLensBundle.message(kindKey)
-        return node.structureSummary?.let { "$kind $it" } ?: kind
+        return node.sourceSummary?.let { "$kind $it" } ?: kind
     }
 
     /**
