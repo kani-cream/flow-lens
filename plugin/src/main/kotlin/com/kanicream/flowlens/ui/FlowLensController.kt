@@ -281,6 +281,11 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
             .inSmartMode(project)
             .expireWith(this)
             .finishOnUiThread(ModalityState.defaultModalityState()) { found ->
+                // The search outlives the run it was started from. Offering its
+                // result after the reader moved to another flow would attach a
+                // choice — and a re-analysis — to a map they are no longer
+                // looking at.
+                if (currentRunId != runId) return@finishOnUiThread
                 if (found != null) offerCandidates(symbol, found)
             }
             .submit(AppExecutorUtil.getAppExecutorService())

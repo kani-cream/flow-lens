@@ -664,10 +664,9 @@ internal class FlowAnalysisRun(
      */
     private fun stillImplements(original: PsiElement?, chosen: PsiElement): Boolean {
         if (original == null) return false
-        return CandidateFinder.find(project, original, limits).candidates.any { candidate ->
-            candidate.symbol.key ==
-                FlowAnalyzerRegistry.forDeclaration(chosen)?.describeCallable(chosen)?.key
-        }
+        val chosenKey = FlowAnalyzerRegistry.forDeclaration(chosen)
+            ?.describeCallable(chosen)?.key ?: return false
+        return CandidateFinder.contains(project, original, chosenKey, limits)
     }
 
     /** Whether the traversal would enter [target] with no choice involved. */
