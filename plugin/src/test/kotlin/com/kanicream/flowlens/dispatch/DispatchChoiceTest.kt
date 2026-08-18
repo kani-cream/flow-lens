@@ -11,7 +11,7 @@ import com.kanicream.flowlens.core.model.FlowAnalysisResult
 import com.kanicream.flowlens.core.model.FlowLimits
 import com.kanicream.flowlens.service.FlowAnalysisService
 import com.kanicream.flowlens.service.FlowMetadata
-import com.kanicream.flowlens.testutil.RealJdkProjectDescriptor
+import com.kanicream.flowlens.testutil.TestSourceRootDescriptor
 import com.kanicream.flowlens.workflow.EntryResolution
 import com.kanicream.flowlens.workflow.FlowEntryResolver
 import com.kanicream.flowlens.workflow.FlowEntryRef
@@ -25,7 +25,7 @@ import kotlinx.coroutines.withTimeout
  */
 class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
 
-    override fun getProjectDescriptor(): LightProjectDescriptor = RealJdkProjectDescriptor.INSTANCE
+    override fun getProjectDescriptor(): LightProjectDescriptor = TestSourceRootDescriptor.INSTANCE
 
     override fun runInDispatchThread(): Boolean = false
 
@@ -296,9 +296,13 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     fun `test a candidate the run could not enter is not offered`() {
+        // A real test source root, so inTestSource is what the IDE reports. The
+        // first version of this test put the file under a directory called
+        // "test", which is production source, and asserted two identical
+        // expressions against each other — it could not have failed.
         ApplicationManager.getApplication().invokeAndWait {
             myFixture.addFileToProject(
-                "test/demo/MockGateway.java",
+                "${TestSourceRootDescriptor.TEST_ROOT}/demo/MockGateway.java",
                 """
                 package demo;
                 public class MockGateway implements Gateway {
@@ -307,29 +311,35 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
                 """.trimIndent(),
             )
         }
-        // Whether a test-source implementation is offered has to match whether
-        // the run would enter it; otherwise choosing it changes nothing and says
-        // nothing about why.
+        val mock = runReadActionBlocking {
+            myFixture.javaFacade.findClass("demo.MockGateway")!!
+        }
+        assertTrue(
+            "the fixture must really treat this as test source",
+            runReadActionBlocking {
+                com.intellij.openapi.roots.ProjectFileIndex.getInstance(project)
+                    .isInTestSourceContent(mock.containingFile.virtualFile)
+            },
+        )
+
         val withoutTests = runReadActionBlocking {
             CandidateFinder.find(project, interfaceMethod(), FlowLimits(includeTests = false))
-        }
+        }.candidates.map { it.symbol.containerName }
         val withTests = runReadActionBlocking {
             CandidateFinder.find(project, interfaceMethod(), FlowLimits(includeTests = true))
-        }
-        assertEquals(
-            withTests.candidates.map { it.symbol.containerName }.toSet() -
-                withoutTests.candidates.map { it.symbol.containerName }.toSet(),
-            withTests.candidates.map { it.symbol.containerName }.toSet() -
-                withoutTests.candidates.map { it.symbol.containerName }.toSet(),
+        }.candidates.map { it.symbol.containerName }
+
+        assertFalse(
+            "offering it under the default settings would mean choosing it does nothing: $withoutTests",
+            withoutTests.contains("MockGateway"),
         )
         assertTrue(
-            "every offered candidate is one the run would enter",
-            withoutTests.candidates.all {
-                runReadActionBlocking {
-                    val decl = (FlowEntryResolver.resolve(project, it.entry) as EntryResolution.Found).declaration
-                    CandidateFinder.enterable(project, decl, FlowLimits(includeTests = false))
-                }
-            },
+            "and turning the setting on makes it a real option: $withTests",
+            withTests.contains("MockGateway"),
+        )
+        assertTrue(
+            "the production implementations are unaffected",
+            withoutTests.containsAll(listOf("PaypalGateway", "StripeGateway")),
         )
     }
 

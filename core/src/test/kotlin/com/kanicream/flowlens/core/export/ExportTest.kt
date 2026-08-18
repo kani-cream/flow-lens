@@ -263,6 +263,35 @@ class ExportTest {
     }
 
     @Test
+    fun `a flow that calls back into its own entry points at the entry`() {
+        // The root is a callable too. Registering only call nodes meant direct
+        // recursion drew a second node for the entry instead of an edge back.
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        b.addEvent(
+            root,
+            FlowEventSpec(
+                kind = FlowNodeKind.CYCLE,
+                callSiteLocation = null,
+                targetSymbol = symbol("run"),
+                resolutionStatus = ResolutionStatus.PROJECT_LOCAL,
+                dispatchConfidence = DispatchConfidence.EXACT,
+            ),
+        )
+        val mermaid = MermaidExporter.export(
+            ExportRequest(b.snapshot(FlowResultStatus.COMPLETED), ExportContext()),
+        )
+
+        assertEquals(
+            1,
+            Regex("^  n\\d+\\[", RegexOption.MULTILINE).findAll(mermaid).count(),
+            "the entry keeps one node: $mermaid",
+        )
+        assertTrue(mermaid.contains("n0 -.->"), mermaid)
+        assertTrue(mermaid.lines().any { it.contains("-.->") && it.trimEnd().endsWith("n0") }, mermaid)
+    }
+
+    @Test
     fun `a branch subgraph lists its members without swallowing the structure`() {
         val mermaid = MermaidExporter.export(request())
         val lines = mermaid.lines()

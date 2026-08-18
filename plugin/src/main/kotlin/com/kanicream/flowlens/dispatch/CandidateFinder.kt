@@ -101,6 +101,35 @@ object CandidateFinder {
     }
 
     /**
+     * Whether [chosen] is still one of [original]'s implementations.
+     *
+     * Separate from [find] on purpose: that one stops at the display cap, so a
+     * type with more implementations than fit the list could report a perfectly
+     * valid choice as no longer related, purely because of where the search
+     * happened to stop. This one searches until it finds the answer.
+     */
+    fun contains(
+        project: Project,
+        original: PsiElement,
+        chosenKey: String,
+        limits: FlowLimits,
+    ): Boolean {
+        var found = false
+        DefinitionsScopedSearch.search(original).forEach(
+            Processor { candidate ->
+                val analyzer = FlowAnalyzerRegistry.forDeclaration(candidate)
+                if (analyzer == null || !analyzer.hasAnalyzableBody(candidate)) {
+                    return@Processor true
+                }
+                if (analyzer.describeCallable(candidate).key != chosenKey) return@Processor true
+                found = enterable(project, candidate, limits)
+                false
+            },
+        )
+        return found
+    }
+
+    /**
      * Whether the run's own policy would enter this declaration. Asking the same
      * question the traversal asks is what keeps the offer honest
      * (`V0.4_SPEC.md` §3.3).

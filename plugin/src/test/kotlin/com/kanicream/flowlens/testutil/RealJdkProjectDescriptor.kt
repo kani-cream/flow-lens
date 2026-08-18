@@ -9,7 +9,7 @@ import com.intellij.testFramework.fixtures.DefaultLightProjectDescriptor
  * (String.trim etc.) resolve to compiled library targets like in a real project.
  * The default light descriptor has no SDK in this harness.
  */
-class RealJdkProjectDescriptor : DefaultLightProjectDescriptor() {
+open class RealJdkProjectDescriptor : DefaultLightProjectDescriptor() {
     override fun getSdk(): Sdk =
         JavaSdk.getInstance().createJdk("flow-lens-test-jdk", System.getProperty("java.home"), false)
 
