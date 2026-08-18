@@ -33,6 +33,14 @@ data class FlowEntryRef(
     /** Project-relative, so the stored file can be shared or committed. */
     val path: String,
 ) {
+    /**
+     * What makes two stored entries the same entry (`V0.3_SPEC.md` §3): the key
+     * *and* the file it was found in. A key alone is not enough — an analyzer
+     * can only promise uniqueness within a file — and treating two entries with
+     * one key as the same would pin, replace, or merge the wrong one.
+     */
+    val id: String get() = "$path::$key"
+
     companion object {
 
         fun of(symbol: FlowSymbol, project: Project, file: VirtualFile): FlowEntryRef =

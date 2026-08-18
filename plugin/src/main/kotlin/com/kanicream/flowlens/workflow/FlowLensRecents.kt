@@ -67,7 +67,7 @@ class FlowLensRecents : PersistentStateComponent<FlowLensRecents.State> {
             includeLibraries = limits.includeLibraries
         }
         synchronized(lock) {
-            state.recents = (listOf(entry) + state.recents.filterNot { it.entry?.key == ref.key })
+            state.recents = (listOf(entry) + state.recents.filterNot { it.entry?.id == ref.id })
                 .take(MAX_RECENTS)
                 .toMutableList()
         }

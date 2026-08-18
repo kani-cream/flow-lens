@@ -15,6 +15,7 @@ import com.kanicream.flowlens.analysis.SourceSummary
 import com.kanicream.flowlens.analysis.FlowLanguageAnalyzer
 import com.kanicream.flowlens.analysis.PsiClassification
 import com.kanicream.flowlens.analysis.ResolvedCallTarget
+import com.kanicream.flowlens.analysis.SymbolQualifier
 import com.kanicream.flowlens.analysis.TargetClassifier
 import com.kanicream.flowlens.core.model.BranchKind
 import com.kanicream.flowlens.core.model.DispatchConfidence
@@ -72,6 +73,11 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
         val function = PsiTreeUtil.getParentOfType(
             leaf, KtNamedFunction::class.java, KtSecondaryConstructor::class.java,
         ) ?: return null
+        // A local function is a traversal boundary when the extractor meets one,
+        // so letting the caret make it a root would contradict that: the same
+        // declaration would be skipped inside a flow and analyzed as its own.
+        // Entry points are top-level functions, members, and constructors.
+        if (function is KtNamedFunction && function.isLocal) return null
         if (!hasAnalyzableBody(function)) return null
         return function
     }
@@ -210,10 +216,11 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
 
     private fun symbolOf(function: KtNamedFunction): FlowSymbol {
         val container = function.containingClassOrObject
-        val file = function.containingKtFile
         val qualifier = container?.fqName?.asString()
             ?: function.fqName?.parent()?.asString()
-            ?: file.name
+            // An object literal's member and a local function have no qualified
+            // name; a bare file name repeats across packages.
+            ?: SymbolQualifier.fileQualifier(function)
         val params = function.valueParameters.joinToString(",") { it.typeReference?.text ?: "?" }
         val receiver = function.receiverTypeReference?.text?.let { "$it." } ?: ""
         return FlowSymbol(

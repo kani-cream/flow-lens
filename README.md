@@ -96,10 +96,23 @@ The `plan/` directory is normative, not aspirational:
 | `plan/TEST_STRATEGY.md` | Required validation layers |
 | `plan/KNOWN_LIMITATIONS.md` | Deliberately accepted limitations |
 | `plan/MILESTONE_0_RESULTS.md` | Feasibility evidence and baseline selection |
+| `plan/V0.1_SPEC.md`, `V0.2_SPEC.md`, `V0.3_SPEC.md` | Fixed semantics per milestone |
+| `plan/V0.1_RESULTS.md`, `V0.2_RESULTS.md`, `V0.3_RESULTS.md` | What was verified, and what was not |
 
 ## Status
 
-v0.1 in development. Java, Kotlin, Go, and mixed Java/Kotlin analysis work
-end to end; Plugin Verifier reports zero compatibility, deprecated,
-experimental, and internal API usages against both the minimum and latest
-supported builds.
+**v0.3 complete.** Java, Kotlin, Go, and mixed Java/Kotlin analysis work end to
+end, with control flow drawn as containers (v0.2) and a workflow layer of pins,
+saved flows, recents, and analyze-from-here (v0.3).
+
+| Milestone | State | Evidence |
+|---|---|---|
+| Milestone 0 — feasibility | done | `plan/MILESTONE_0_RESULTS.md` |
+| v0.1 — method flow and canvas | done | `plan/V0.1_RESULTS.md` |
+| v0.2 — control flow | done | `plan/V0.2_RESULTS.md` |
+| v0.3 — developer workflow | done | `plan/V0.3_RESULTS.md` |
+| v0.4 — ambiguity and sharing | next | `plan/PLAN.md` §17 |
+
+Plugin Verifier reports zero compatibility, deprecated, experimental, and
+internal API usages against both the minimum and latest supported builds.
+Verified in the sandbox IDE; checks in a production IDE are scheduled for v1.0.
