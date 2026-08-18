@@ -214,6 +214,49 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
         )
     }
 
+    fun `test relation checking sees past the display cap`() {
+        // The display list stops at MAX_CANDIDATES; whether a particular class is
+        // still an implementation must not. A type with more implementations than
+        // fit the menu had valid choices dropped purely because of where the
+        // search stopped, so this is the boundary that regression sits on.
+        ApplicationManager.getApplication().invokeAndWait {
+            repeat(CandidateFinder.MAX_CANDIDATES + 3) { index ->
+                myFixture.addFileToProject(
+                    "demo/Aaa$index.java",
+                    """
+                    package demo;
+                    public class Aaa$index implements Gateway {
+                        public void charge() { }
+                    }
+                    """.trimIndent(),
+                )
+            }
+        }
+        val stripeKey = runReadActionBlocking {
+            val cls = myFixture.javaFacade.findClass("demo.StripeGateway")!!
+            val method = PsiTreeUtil.findChildrenOfType(cls, PsiMethod::class.java)
+                .first { it.name == "charge" }
+            com.kanicream.flowlens.analysis.FlowAnalyzerRegistry
+                .forDeclaration(method)!!.describeCallable(method).key
+        }
+
+        val shown = runReadActionBlocking {
+            CandidateFinder.find(project, interfaceMethod(), FlowLimits())
+        }
+        assertTrue("the fixture must overflow the cap", shown.partial)
+        assertFalse(
+            "the fixture needs the target to fall outside the shown list",
+            shown.candidates.any { it.symbol.key == stripeKey },
+        )
+
+        assertTrue(
+            "a choice must not be dropped for sorting behind twenty siblings",
+            runReadActionBlocking {
+                CandidateFinder.contains(project, interfaceMethod(), stripeKey, FlowLimits())
+            },
+        )
+    }
+
     fun `test I a chosen continuation obeys the depth limit like any other`() {
         val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod(), FlowLimits()) }
             .candidates.first { it.symbol.containerName == "StripeGateway" }
