@@ -55,6 +55,25 @@ class ExtractedTerminator(
 ) : FlowItem
 
 /**
+ * A callable body passed to a call — a lambda, a trailing lambda, a function
+ * literal (`V0.5_SPEC.md` §3).
+ *
+ * It is emitted after the call that receives it, because the call is what the
+ * body was given to. [executionMode] and [orderingStatus] answer the only
+ * question that matters about it: when does this run. `UNKNOWN` is the honest
+ * answer whenever nothing justifies a better one.
+ */
+class ExtractedCallback(
+    val body: PsiElement,
+    /** The call that received it, for naming: "callback of submit()". */
+    val receiverShortName: String,
+    val executionMode: ExecutionMode,
+    val orderingStatus: OrderingStatus,
+    /** True when the enclosing call itself may not execute. */
+    val conditional: Boolean = false,
+) : FlowItem
+
+/**
  * One explicit call discovered inside a callable body, in language evaluation order.
  */
 class ExtractedCall(
@@ -90,6 +109,7 @@ class DirectFlowExtraction(
             is ExtractedCall -> listOf(item)
             is ExtractedStructure -> item.branches.flatMap { flatten(it.items) }
             is ExtractedTerminator -> emptyList()
+            is ExtractedCallback -> emptyList()
         }
     }
 }

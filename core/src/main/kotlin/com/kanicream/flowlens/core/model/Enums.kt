@@ -13,6 +13,12 @@ enum class FlowNodeKind {
     TRY,
     CATCH,
     FINALLY,
+    /**
+     * A callable body handed to another callable: a lambda, a trailing lambda,
+     * a Go function literal. It owns a frame like a call does, and carries the
+     * execution mode and ordering that say when it runs (`V0.5_SPEC.md` §3).
+     */
+    CALLBACK,
     CYCLE,
     LIMIT,
     STATUS,

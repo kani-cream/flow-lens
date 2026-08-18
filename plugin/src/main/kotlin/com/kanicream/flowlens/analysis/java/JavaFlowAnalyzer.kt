@@ -46,6 +46,11 @@ import com.kanicream.flowlens.analysis.ExtractedTerminator
 import com.kanicream.flowlens.analysis.FlowItem
 import com.kanicream.flowlens.analysis.SourceSummary
 import com.kanicream.flowlens.analysis.FlowLanguageAnalyzer
+import com.intellij.psi.PsiExpressionList
+import com.intellij.psi.PsiMethodReferenceExpression
+import com.kanicream.flowlens.analysis.CallbackTiming
+import com.kanicream.flowlens.analysis.ExtractedCallback
+import com.kanicream.flowlens.analysis.KnownCallbackApis
 import com.kanicream.flowlens.analysis.SymbolQualifier
 import com.kanicream.flowlens.analysis.TargetClassifier
 import com.kanicream.flowlens.analysis.ResolvedCallTarget
@@ -65,6 +70,7 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
     override val languageId: String = "java"
 
     override fun supportsDeclaration(element: PsiElement): Boolean =
+        element is PsiLambdaExpression ||
         element is PsiMethod && element.language == JavaLanguage.INSTANCE
 
     override fun findEntryPoint(file: PsiFile, offset: Int): PsiElement? {
@@ -76,7 +82,22 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
         return method
     }
 
-    override fun describeCallable(callable: PsiElement): FlowSymbol = symbolOf(callable as PsiMethod)
+    override fun describeCallable(callable: PsiElement): FlowSymbol = when (callable) {
+        is PsiLambdaExpression -> lambdaSymbolOf(callable)
+        else -> symbolOf(callable as PsiMethod)
+    }
+
+    /**
+     * A lambda has no name of its own. Keyed by its position in the file so two
+     * lambdas in one method stay distinct, which cycle detection and pins both
+     * depend on.
+     */
+    private fun lambdaSymbolOf(lambda: PsiLambdaExpression): FlowSymbol = FlowSymbol(
+        languageId = languageId,
+        displayName = "{ }",
+        containerName = PsiTreeUtil.getParentOfType(lambda, PsiMethod::class.java)?.name,
+        key = "java:lambda@${SymbolQualifier.fileQualifier(lambda)}:${lambda.textOffset}",
+    )
 
     override fun hasAnalyzableBody(declaration: PsiElement): Boolean =
         declaration is PsiMethod && declaration.body != null
@@ -217,18 +238,18 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
         fun walk(element: PsiElement) {
             when (element) {
                 is PsiComment -> return
-                // Traversal boundaries (KNOWN_LIMITATIONS.md section 11): nested callable
-                // bodies do not execute as part of this frame's synchronous flow.
+                // A lambda does not run where it is written, so it is not walked
+                // here. It is emitted after the call that received it, carrying
+                // the timing that says when it does run (`V0.5_SPEC.md` §3).
                 is PsiLambdaExpression -> return
+                is PsiMethodReferenceExpression -> return
                 is PsiClass -> return
                 is PsiMethodCallExpression -> {
                     element.methodExpression.qualifierExpression?.let(::walk)
                     element.argumentList.expressions.forEach(::walk)
-                    addCall(
-                        element,
-                        FlowNodeKind.CALL,
-                        element.methodExpression.referenceName ?: element.methodExpression.text,
-                    )
+                    val name = element.methodExpression.referenceName ?: element.methodExpression.text
+                    addCall(element, FlowNodeKind.CALL, name)
+                    addCallbacks(element.argumentList, name) { element.resolveMethod() }
                 }
                 is PsiNewExpression -> {
                     element.qualifier?.let(::walk)
@@ -238,6 +259,11 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
                         FlowNodeKind.CONSTRUCTOR,
                         element.classReference?.referenceName ?: "new",
                     )
+                    element.argumentList?.let { args ->
+                        addCallbacks(args, element.classReference?.referenceName ?: "new") {
+                            element.resolveConstructor()
+                        }
+                    }
                 }
                 is PsiIfStatement -> walkIf(element)
                 is PsiConditionalExpression -> walkTernary(element)
@@ -485,6 +511,38 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
                 sink = previous
             }
             return ExtractedBranch(kind, label, collected.toList())
+        }
+
+        /**
+         * Emits one event per lambda handed to this call, in argument order.
+         *
+         * Java has no language-level signal that a lambda runs in place, so the
+         * timing comes from the documented API list and is otherwise
+         * undetermined — which the map states rather than hides.
+         */
+        private fun addCallbacks(
+            arguments: PsiExpressionList,
+            receiverName: String,
+            resolve: () -> PsiMethod?,
+        ) {
+            val lambdas = arguments.expressions.filterIsInstance<PsiLambdaExpression>()
+            if (lambdas.isEmpty()) return
+            val timing = KnownCallbackApis.javaTiming(qualifiedNameOf(resolve()))
+                ?: CallbackTiming.UNDETERMINED
+            for (lambda in lambdas) {
+                sink += ExtractedCallback(
+                    body = lambda,
+                    receiverShortName = receiverName,
+                    executionMode = timing.executionMode,
+                    orderingStatus = timing.orderingStatus,
+                    conditional = conditionalDepth > 0,
+                )
+            }
+        }
+
+        private fun qualifiedNameOf(method: PsiMethod?): String? {
+            val owner = method?.containingClass?.qualifiedName ?: return null
+            return "$owner.${method.name}"
         }
 
         private fun addCall(callSite: PsiElement, kind: FlowNodeKind, shortName: String) {
