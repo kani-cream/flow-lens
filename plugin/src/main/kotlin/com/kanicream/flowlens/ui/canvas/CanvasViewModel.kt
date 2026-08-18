@@ -56,6 +56,11 @@ class CardVM(
     val childFrame: FrameVM?,
     /** Labelled sections of a structural card, laid out inside its container. */
     val sections: List<SectionVM> = emptyList(),
+    /**
+     * The target is a callable the developer is tracking (`V0.3_SPEC.md` §4).
+     * A mark, never a colour on its own (`VISUAL_DESIGN.md` §21).
+     */
+    val pinned: Boolean = false,
 ) {
     val nodeId: NodeId get() = node.id
 
@@ -122,6 +127,7 @@ class FrameVM(
     val isRoot: Boolean,
     val entryLocation: com.kanicream.flowlens.core.model.FlowLocation?,
     val cards: List<CardVM>,
+    val pinned: Boolean = false,
 ) {
     /**
      * Identifies the entry for selection. The root is a frame rather than a call
@@ -189,9 +195,13 @@ object CanvasMetrics {
  */
 object CanvasViewModelBuilder {
 
-    fun build(result: FlowAnalysisResult, expandedNodes: Set<NodeId>): FrameVM? {
+    fun build(
+        result: FlowAnalysisResult,
+        expandedNodes: Set<NodeId>,
+        pinnedKeys: Set<String> = emptySet(),
+    ): FrameVM? {
         val root = result.rootFrame ?: return null
-        val rootVM = frameVM(result, root, expandedNodes, isRoot = true)
+        val rootVM = frameVM(result, root, expandedNodes, isRoot = true, pinnedKeys = pinnedKeys)
         layoutFrame(
             frame = rootVM,
             x = CanvasMetrics.CANVAS_MARGIN,
@@ -221,9 +231,10 @@ object CanvasViewModelBuilder {
         frame: FlowFrame,
         expandedNodes: Set<NodeId>,
         isRoot: Boolean,
+        pinnedKeys: Set<String>,
     ): FrameVM {
         val cards = frame.events.map { node ->
-            cardVM(result, node, expandedNodes, ownerType = frame.symbol.containerName)
+            cardVM(result, node, expandedNodes, frame.symbol.containerName, pinnedKeys)
         }
         return FrameVM(
             frameId = frame.id,
@@ -236,6 +247,7 @@ object CanvasViewModelBuilder {
             isRoot = isRoot,
             entryLocation = frame.entryLocation,
             cards = cards,
+            pinned = frame.symbol.key in pinnedKeys,
         )
     }
 
@@ -255,6 +267,7 @@ object CanvasViewModelBuilder {
         node: FlowNode,
         expandedNodes: Set<NodeId>,
         ownerType: String?,
+        pinnedKeys: Set<String>,
     ): CardVM {
         val style = styleOf(node)
         val childFrame = node.targetFrameId?.let(result::frame)
@@ -263,11 +276,13 @@ object CanvasViewModelBuilder {
         val sections = node.branches.map { branch ->
             SectionVM(
                 title = sectionTitleOf(branch),
-                cards = branch.events.map { event -> cardVM(result, event, expandedNodes, ownerType) },
+                cards = branch.events.map { event ->
+                    cardVM(result, event, expandedNodes, ownerType, pinnedKeys)
+                },
             )
         }
         val childVM = if (expanded && childFrame != null) {
-            frameVM(result, childFrame, expandedNodes, isRoot = false)
+            frameVM(result, childFrame, expandedNodes, isRoot = false, pinnedKeys = pinnedKeys)
         } else {
             // A collapsed child frame is not laid out at all, so a deep result
             // costs nothing until the user opens it.
@@ -297,6 +312,7 @@ object CanvasViewModelBuilder {
                 node.executionMode != ExecutionMode.SYNC,
             expandable = expandable,
             expanded = expanded,
+            pinned = node.targetSymbol?.key?.let { it in pinnedKeys } == true,
             // The target frame exists but has not been analyzed yet: a transient
             // UI-only state that never counts against the node budget. Once the run
             // is terminal nothing is being resolved any more, so a frame left

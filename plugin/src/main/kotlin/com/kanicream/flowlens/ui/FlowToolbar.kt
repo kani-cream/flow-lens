@@ -41,11 +41,15 @@ class FlowToolbar(
         fun zoomPercent(): Int
         fun isRunning(): Boolean
         fun canAnalyze(): Boolean
+
+        /** Shows the saved flows, recents, and pins (`V0.3_SPEC.md` §4–5). */
+        fun showFlows(component: JComponent, x: Int, y: Int)
     }
 
     private val group = DefaultActionGroup(
         AnalyzeAction(),
         StopAction(),
+        FlowsAction(),
         Separator.getInstance(),
         ZoomOutAction(),
         ZoomLevelAction(),
@@ -71,6 +75,23 @@ class FlowToolbar(
      */
     fun refresh() {
         toolbar?.updateActionsAsync()
+    }
+
+    /**
+     * A popup rather than a permanent list: the tool window is routinely narrow,
+     * and this is something the user opens between analyses, not during one.
+     */
+    private inner class FlowsAction : AnAction(
+        FlowLensBundle.message("action.flows.text"),
+        FlowLensBundle.message("action.flows.description"),
+        AllIcons.Actions.ListFiles,
+    ), DumbAware {
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+
+        override fun actionPerformed(e: AnActionEvent) {
+            val source = e.inputEvent?.component as? JComponent ?: return
+            commands.showFlows(source, 0, source.height)
+        }
     }
 
     private inner class AnalyzeAction : AnAction(

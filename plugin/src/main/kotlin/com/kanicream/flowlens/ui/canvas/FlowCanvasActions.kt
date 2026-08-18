@@ -51,6 +51,13 @@ class FlowCanvasActions(private val canvas: FlowCanvas, parent: Disposable) {
         canvasAction("flow.action.toggle.expansion", KeyEvent.VK_SPACE, 0) {
             canvas.selectedCard()?.let(canvas::toggleExpansion)
         },
+        // A pin marks the callable, so the entry can be pinned as well as a call.
+        canvasAction("flow.action.toggle.pin", KeyEvent.VK_P, menuMask()) {
+            canvas.onTogglePin(canvas.selectedCard())
+        },
+        canvasAction("flow.action.analyze.from.here", KeyEvent.VK_B, menuMask()) {
+            canvas.selectedCard()?.let(canvas.onAnalyzeFromHere)
+        },
     )
 
     private fun navigateToSelection(takeFocus: Boolean) {

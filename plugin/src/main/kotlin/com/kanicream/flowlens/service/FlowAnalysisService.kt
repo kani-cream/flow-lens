@@ -103,6 +103,9 @@ class FlowAnalysisService(
         return runId
     }
 
+    /** The limits the current run used, so a saved flow can reproduce it. */
+    fun limitsOfCurrentRun(): FlowLimits? = synchronized(lock) { lastRequest?.limits }
+
     /** Cooperative cancellation; completed nodes stay navigable. */
     fun cancelActive() {
         synchronized(lock) { activeJob }?.cancel()

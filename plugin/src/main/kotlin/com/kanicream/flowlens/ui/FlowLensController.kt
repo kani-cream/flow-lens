@@ -10,6 +10,16 @@ import com.kanicream.flowlens.core.model.FlowAnalysisResult
 import com.kanicream.flowlens.core.model.FlowLocation
 import com.kanicream.flowlens.core.model.FlowProgress
 import com.kanicream.flowlens.core.model.RunId
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.openapi.ui.Messages
+import javax.swing.JComponent
+import com.kanicream.flowlens.FlowLensBundle
+import com.kanicream.flowlens.core.model.FlowLimits
+import com.kanicream.flowlens.core.model.ResolutionStatus
+import com.kanicream.flowlens.workflow.FlowEntryLauncher
+import com.kanicream.flowlens.workflow.FlowEntryRef
+import com.kanicream.flowlens.workflow.FlowLensFlows
+import com.kanicream.flowlens.workflow.LaunchOutcome
 import com.kanicream.flowlens.service.FlowAnalysisService
 import com.kanicream.flowlens.ui.canvas.CardVM
 import com.kanicream.flowlens.ui.canvas.FlowCanvas
@@ -69,6 +79,10 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
         // a call event, so there is no call-site or dispatch state to describe.
         canvas.onEntrySelected = { selectionModel.select(null) }
         canvas.onZoomChanged = { onViewStateChanged() }
+        canvas.onTogglePin = ::togglePin
+        canvas.onAnalyzeFromHere = ::analyzeFromHere
+        flows.onChanged = { refreshPins() }
+        refreshPins()
         selectionModel.addListener { card: CardVM? -> detailsPanel.show(card?.node) }
         subscribe()
     }
@@ -98,6 +112,100 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
 
     override fun canAnalyze(): Boolean =
         FileEditorManager.getInstance(project).selectedTextEditor != null
+
+    override fun showFlows(component: JComponent, x: Int, y: Int) {
+        flowsMenu.show(component, x, y)
+    }
+
+    // ---- workflow commands ----
+
+    private val flows get() = FlowLensFlows.getInstance(project)
+
+    private val flowsMenu = FlowsMenu(
+        project = project,
+        openEntry = { ref, limits -> openEntry(ref, limits) },
+        saveCurrent = ::saveCurrentFlow,
+        canSaveCurrent = { service.results.value?.rootFrame != null },
+    )
+
+    /**
+     * Saves the current entry point with the limits the run used, so opening it
+     * later reproduces that analysis rather than re-running it under whatever the
+     * settings happen to be (`V0.3_SPEC.md` §5.1).
+     */
+    private fun saveCurrentFlow() {
+        val entry = currentEntry() ?: return
+        val name = Messages.showInputDialog(
+            project,
+            FlowLensBundle.message("flows.save.prompt.message"),
+            FlowLensBundle.message("flows.save.prompt.title"),
+            null,
+            entry.displayName,
+            null,
+        )?.takeIf { it.isNotBlank() } ?: return
+        flows.save(name, entry, service.limitsOfCurrentRun() ?: FlowLimits())
+    }
+
+    private fun refreshPins() {
+        canvas.pinnedKeys = flows.pinnedKeys()
+    }
+
+    /**
+     * Pins the selected callable, or the entry when nothing is selected: a pin
+     * marks a function, so the root is as pinnable as any call it makes.
+     */
+    private fun togglePin(card: CardVM?) {
+        val result = service.results.value ?: return
+        val symbol = card?.node?.targetSymbol ?: result.rootFrame?.symbol ?: return
+        val location = card?.node?.targetLocation ?: result.rootFrame?.entryLocation
+        val file = fileOf(location) ?: return
+        flows.togglePin(FlowEntryRef.of(symbol, project, file))
+        refreshPins()
+    }
+
+    /** Promotes a call's target to the new root (`V0.3_SPEC.md` §6). */
+    private fun analyzeFromHere(card: CardVM) {
+        if (!canAnalyzeFrom(card)) return
+        val location = card.node.targetLocation ?: return
+        val pointer = currentRunId?.let { service.navigationPointer(it, location.handle) } ?: return
+        val target = runReadActionBlocking {
+            val element = pointer.element?.takeIf { it.isValid } ?: return@runReadActionBlocking null
+            element.containingFile?.virtualFile?.let { it to element.textOffset }
+        } ?: return
+        service.startAnalysis(target.first, target.second)
+        canvas.requestFocusInWindow()
+    }
+
+    /**
+     * Only a target with a body offers something to analyze. An external,
+     * unresolved, or built-in call would start a run with nothing in it, so the
+     * command is disabled rather than failing (`V0.3_SPEC.md` §6.1).
+     */
+    private fun canAnalyzeFrom(card: CardVM): Boolean =
+        card.node.targetLocation != null &&
+            card.node.resolutionStatus == ResolutionStatus.PROJECT_LOCAL
+
+    /** Opens a stored entry, reporting rather than guessing when it is gone. */
+    fun openEntry(ref: FlowEntryRef, limits: FlowLimits?): LaunchOutcome {
+        val outcome = FlowEntryLauncher.launch(project, ref, limits)
+        if (outcome is LaunchOutcome.Started) canvas.requestFocusInWindow()
+        return outcome
+    }
+
+    /** The current root as a storable entry, or null when there is no result. */
+    fun currentEntry(): FlowEntryRef? {
+        val root = service.results.value?.rootFrame ?: return null
+        val file = fileOf(root.entryLocation) ?: return null
+        return FlowEntryRef.of(root.symbol, project, file)
+    }
+
+    private fun fileOf(location: FlowLocation?): VirtualFile? {
+        val handle = location?.handle ?: return null
+        val pointer = currentRunId?.let { service.navigationPointer(it, handle) } ?: return null
+        return runReadActionBlocking {
+            pointer.element?.takeIf { it.isValid }?.containingFile?.virtualFile
+        }
+    }
 
     private fun reanalyze() {
         service.reanalyze()
