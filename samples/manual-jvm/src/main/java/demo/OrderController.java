@@ -6,7 +6,11 @@ package demo;
  *
  * Expected root event order:
  *   load, convert, save, validate, validate, work, charge, Receipt(new),
- *   trim(EXTERNAL), handle(Kotlin)
+ *   trim(EXTERNAL), handle(Kotlin), record
+ *
+ * record() is also called from Pins.demo(), so a pin on it is visible in both
+ * flows — that is what makes a pin a mark on a callable rather than on a call
+ * site (`V0.3_SPEC.md` §4).
  */
 public class OrderController {
 
@@ -22,7 +26,8 @@ public class OrderController {
         new Receipt();                    // constructor card
         rawOrder.trim();                  // J: EXTERNAL + PROJECT BOUNDARY
         KtService.handle();               // E: Java -> Kotlin -> Java
-    }
+        Audit.record();                   // shared with Pins.demo(): pin it in
+    }                                     // either flow and see it in the other
 
     String load() { return ""; }
     String convert(String s) { return s; }
