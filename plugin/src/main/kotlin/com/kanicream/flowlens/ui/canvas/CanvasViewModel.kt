@@ -251,10 +251,14 @@ object CanvasViewModelBuilder {
             style = style,
             depthLabel = FlowLensBundle.message("card.depth.label", node.depth),
             boundaryBeforeCard = node.resolutionStatus == ResolutionStatus.EXTERNAL,
-            // A conditional call is not a proven continuation, so it must not get
-            // the ordinary certain connector either (`V0.1_SPEC.md` §13).
+            // The ordinary connector claims "this runs next". That is untrue for a
+            // conditional call (`V0.1_SPEC.md` §13) and equally untrue for a
+            // goroutine, which may run at any time, or a deferred call, which runs
+            // when the frame returns (§21 case R: a deferred call must not be
+            // presented as an ordinary immediate call).
             dashedIncomingConnector = node.orderingStatus != OrderingStatus.DETERMINISTIC ||
-                node.metadata[FlowMetadata.CONDITIONAL] == "true",
+                node.metadata[FlowMetadata.CONDITIONAL] == "true" ||
+                node.executionMode != ExecutionMode.SYNC,
             expandable = expandable,
             expanded = expanded,
             // The target frame exists but has not been analyzed yet: a transient

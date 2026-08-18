@@ -219,6 +219,11 @@ class CanvasViewModelTest : BasePlatformTestCase() {
             "goroutine and deferred must not look the same",
             cards[1].executionGlyph == cards[2].executionGlyph,
         )
+        // A goroutine may run at any time and a deferred call runs when the frame
+        // returns, so neither may be joined by the connector that means "next".
+        assertTrue("a goroutine is not the next step", cards[1].dashedIncomingConnector)
+        assertTrue("a deferred call is not the next step", cards[2].dashedIncomingConnector)
+        assertFalse("an ordinary call still is", cards[0].dashedIncomingConnector)
     }
 
     fun `test one line cards keep the flow as short as the sequence allows`() {

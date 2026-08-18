@@ -318,6 +318,57 @@ class V01AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
         assertNotNull("an explicit constructor body is analyzable", call.targetFrameId)
     }
 
+    fun `test Q and R go concurrency is preserved and never drawn as the next step`() {
+        ApplicationManager.getApplication().invokeAndWait {
+            myFixture.configureByText(
+                "concurrency.go",
+                """
+                package sample
+
+                func run() {
+                    save()
+                    go notify()
+                    defer cleanup(produce())
+                }
+
+                func save() { }
+                func notify() { }
+                func produce() int { return 1 }
+                func cleanup(x int) { }
+                """.trimIndent(),
+            )
+        }
+        val offset = myFixture.file.text.indexOf("func run()") + 6
+        service.startAnalysis(myFixture.file.virtualFile, offset, FlowLimits())
+        val result = runBlocking {
+            withTimeout(60_000) { service.results.first { it != null && it.isTerminal }!! }
+        }
+
+        val events = result.rootFrame!!.events
+        assertEquals(
+            listOf("save()", "notify()", "produce()", "cleanup()"),
+            events.map { it.targetSymbol!!.displayName },
+        )
+        assertEquals(ExecutionMode.SYNC, events[0].executionMode)
+        assertEquals(ExecutionMode.GOROUTINE, events[1].executionMode)
+        assertEquals(
+            "a deferred call's argument is evaluated immediately",
+            ExecutionMode.SYNC,
+            events[2].executionMode,
+        )
+        assertEquals(ExecutionMode.DEFERRED, events[3].executionMode)
+
+        val cards = CanvasViewModelBuilder.build(result, emptySet())!!.cards
+        assertFalse("an ordinary call is the next step", cards[0].dashedIncomingConnector)
+        assertTrue("a goroutine is not", cards[1].dashedIncomingConnector)
+        assertFalse("the deferred call's argument is", cards[2].dashedIncomingConnector)
+        assertTrue("the deferred call itself is not", cards[3].dashedIncomingConnector)
+        assertFalse(
+            "goroutine and deferred stay distinguishable from each other",
+            cards[1].executionGlyph == cards[3].executionGlyph,
+        )
+    }
+
     fun `test execution mode is synchronous for ordinary jvm calls`() {
         val result = analyze(
             "E.java",
