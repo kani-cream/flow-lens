@@ -20,6 +20,22 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>0.2.0 — Control flow on the map.</b></p>
+        <ul>
+            <li>Branches, multi-way branches, loops, and exception handling are now
+            part of the map: a structure is one container with labelled sections,
+            and the sequence visibly resumes after it.</li>
+            <li>Java <code>if</code>/<code>switch</code>/loops/<code>try</code>,
+            Kotlin <code>if</code>/<code>when</code>/loops/<code>try</code>, and Go
+            <code>if</code>/<code>switch</code>/<code>select</code>/loops, plus
+            <code>return</code> and <code>throw</code> as terminal markers.</li>
+            <li>A repeated call appears once inside its loop container instead of
+            being duplicated outside it.</li>
+            <li>The "control flow simplified" disclosure now appears only for control
+            flow that is genuinely not represented, such as a short-circuit operand
+            or a <code>break</code>, rather than on every branch.</li>
+        </ul>
+
         <p><b>0.1.0 — Multi-language method flow and Flow Canvas.</b></p>
         <ul>
             <li>Analyze a Java, Kotlin, or Go function into an explorable flow map;
