@@ -133,6 +133,43 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
         )
     }
 
+    fun `test candidates are not narrowed by what the receiver provably is`() {
+        // `= new StripeGateway()` makes the runtime type knowable by reading the
+        // class, but the search is on the declared method, so both
+        // implementations are still offered. KNOWN_LIMITATIONS.md §37 documents
+        // this; here it is the observed behavior rather than a claim.
+        ApplicationManager.getApplication().invokeAndWait {
+            myFixture.configureByText(
+                "Fixed.java",
+                """
+                public class Fixed {
+                    private final demo.Gateway gateway = new demo.StripeGateway();
+                    void run() { gateway.charge(); }
+                }
+                """.trimIndent(),
+            )
+        }
+        val result = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+
+        assertEquals(
+            "the declared type's implementations, not the receiver's",
+            listOf("PaypalGateway", "StripeGateway"),
+            result.candidates.map { it.symbol.containerName },
+        )
+
+        // And the call is still reported ambiguous, for the same reason.
+        val entry = "void run()"
+        val offset = myFixture.file.text.indexOf(entry) + entry.length - 2
+        val runId = service.startAnalysis(myFixture.file.virtualFile, offset, FlowLimits())
+        val analysis = runBlocking {
+            withTimeout(60_000) { service.results.first { it?.runId == runId && it.isTerminal }!! }
+        }
+        assertEquals(
+            DispatchConfidence.AMBIGUOUS,
+            analysis.rootFrame!!.events.single().dispatchConfidence,
+        )
+    }
+
     fun `test B a call with no implementation in the project offers nothing`() {
         ApplicationManager.getApplication().invokeAndWait {
             myFixture.addFileToProject(
