@@ -75,6 +75,15 @@ class KotlinStructureExtractionTest : LightJavaCodeInsightFixtureTestCase() {
         )
     }
 
+    fun `test a when entry guard is on the map`() {
+        val items = itemsOf("when (subject()) { 1 if cond() -> a(); else -> b() }")
+        assertEquals(
+            "the guard is evaluated to choose the entry, so it is inside it",
+            listOf("CASE(1)=[cond, a]", "DEFAULT=[b]"),
+            structure(items).branches.map(::branchShape),
+        )
+    }
+
     fun `test a while loop keeps its repeated condition inside the body`() {
         val items = itemsOf("while (cond()) { a() }; d()")
         assertEquals(listOf("LOOP", "d"), shape(items))

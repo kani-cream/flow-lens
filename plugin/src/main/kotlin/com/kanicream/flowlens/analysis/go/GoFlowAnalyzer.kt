@@ -4,6 +4,8 @@ import com.goide.psi.GoAndExpr
 import com.goide.psi.GoBinaryExpr
 import com.goide.psi.GoBreakStatement
 import com.goide.psi.GoCaseClause
+import com.goide.psi.GoCommClause
+import com.goide.psi.GoExprCaseClause
 import com.goide.psi.GoContinueStatement
 import com.goide.psi.GoReturnStatement
 import com.goide.psi.GoCallExpr
@@ -190,13 +192,18 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                     // A `break` that leaves a switch or select case is already
                     // expressed by the case boundary; only a jump out of a loop is
                     // flow the map does not show (`V0.2_SPEC.md` §6).
+                    // A labelled break leaves whatever the label names, which the
+                    // nearest enclosing statement does not tell us, so it always
+                    // counts as flow the map does not draw.
                     val target = PsiTreeUtil.getParentOfType(
                         element,
                         GoForStatement::class.java,
                         GoSwitchStatement::class.java,
                         GoSelectStatement::class.java,
                     )
-                    if (target is GoForStatement) controlFlowSimplified = true
+                    if (element.labelRef != null || target is GoForStatement) {
+                        controlFlowSimplified = true
+                    }
                 }
                 is GoContinueStatement -> controlFlowSimplified = true
                 is GoAndExpr, is GoOrExpr -> {
@@ -263,7 +270,17 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                 branch(
                     if (isDefault) BranchKind.DEFAULT else BranchKind.CASE,
                     if (isDefault) null else SourceSummary.of(caseLabelOf(clause)),
-                ) { clause.statementList.forEach(::walk) }
+                ) {
+                    // A case label is an expression in Go — `case isReady():` or
+                    // `case v := <-recv():`. It is evaluated to choose this case,
+                    // so its calls belong inside the section rather than nowhere.
+                    when (clause) {
+                        is GoExprCaseClause -> clause.expressionList.forEach(::walk)
+                        is GoCommClause -> clause.commCase?.let(::walk)
+                        else -> Unit
+                    }
+                    clause.statementList.forEach(::walk)
+                }
             }
             sink += ExtractedStructure(
                 kind = FlowNodeKind.SWITCH,
@@ -274,10 +291,16 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
             )
         }
 
-        private fun caseLabelOf(clause: GoCaseClause): String? {
-            val text = clause.text.substringBefore(':').trim()
-            return text.removePrefix("case").trim().ifEmpty { null }
-        }
+        /**
+         * The case label as written. Taken from the clause's own parts rather
+         * than from its text up to the first colon, because `case v := <-ch:`
+         * contains a colon of its own and would otherwise read as `v`.
+         */
+        private fun caseLabelOf(clause: GoCaseClause): String? = when (clause) {
+            is GoExprCaseClause -> clause.expressionList.joinToString(", ") { it.text }
+            is GoCommClause -> clause.commCase?.text?.removePrefix("case")?.trim()
+            else -> null
+        }?.trim()?.ifEmpty { null }
 
         private fun switchSubjectOf(element: PsiElement): String? = element.children
             .filterNot { it is GoCaseClause }

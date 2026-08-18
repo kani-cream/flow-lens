@@ -127,6 +127,51 @@ class GoStructureExtractionTest : BasePlatformTestCase() {
         assertTrue(extraction.controlFlowSimplified)
     }
 
+    fun `test a call written in a case label is on the map`() {
+        // The idiomatic tagless switch: the label is the condition.
+        val items = itemsOf("switch {\ncase cond():\na()\ndefault:\nb()\n}")
+        val switch = structure(items)
+        assertEquals(
+            "the label's call is evaluated to choose the case, so it is inside it",
+            listOf("CASE(cond())=[cond, a]", "DEFAULT=[b]"),
+            switch.branches.map(::branchShape),
+        )
+    }
+
+    fun `test a call in a select comm case is on the map`() {
+        val items = itemsOf("select {\ncase v := <-recv():\n_ = v\na()\n}", decls = "func recv() chan int { return nil }")
+        val select = structure(items)
+        assertEquals(
+            listOf("CASE(v := <-recv())=[recv, a]"),
+            select.branches.map(::branchShape),
+        )
+    }
+
+    fun `test a labelled break out of a loop is disclosed`() {
+        val file = myFixture.configureByText(
+            "labelled.go",
+            """
+            package sample
+
+            func run(k int) {
+            Outer:
+                for {
+                    switch k {
+                    case 1:
+                        break Outer
+                    }
+                }
+            }
+            """.trimIndent(),
+        )
+        val function = PsiTreeUtil.findChildrenOfType(file, GoFunctionOrMethodDeclaration::class.java)
+            .first { it.name == "run" }
+        assertTrue(
+            "the jump leaves the loop, not the switch, and the map does not draw it",
+            analyzer.extractDirectFlow(function).controlFlowSimplified,
+        )
+    }
+
     fun `test a break that leaves a switch case discloses nothing`() {
         val file = myFixture.configureByText(
             "brk.go",

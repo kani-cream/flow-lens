@@ -5,6 +5,7 @@ import com.intellij.psi.JavaTokenType
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiConditionalExpression
+import com.intellij.psi.PsiBlockStatement
 import com.intellij.psi.PsiBreakStatement
 import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.PsiYieldStatement
@@ -292,6 +293,9 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
 
         private fun walkSwitch(element: PsiSwitchBlock) {
             element.expression?.let(::walk)
+            // `case 1 -> f();` cannot fall through, so the check below does not
+            // apply to a rule-style switch at all.
+            var anyRuleLabel = false
             val groups = mutableListOf<Pair<PsiSwitchLabelStatementBase?, List<PsiElement>>>()
             var current: MutableList<PsiElement>? = null
             var currentLabel: PsiSwitchLabelStatementBase? = null
@@ -305,8 +309,14 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
                         flush()
                         currentLabel = child
                         current = mutableListOf()
+                        // A guard (`case Integer i when check(i)`) is evaluated to
+                        // choose this case, so it belongs inside the section.
+                        child.guardExpression?.let { current?.add(it) }
                         // A rule-style label (`case 1 -> f();`) carries its body.
-                        (child as? PsiSwitchLabeledRuleStatement)?.body?.let { current?.add(it) }
+                        (child as? PsiSwitchLabeledRuleStatement)?.let {
+                            anyRuleLabel = true
+                            it.body?.let { body -> current?.add(body) }
+                        }
                     }
                     is PsiComment -> Unit
                     else -> current?.add(child)
@@ -316,7 +326,7 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
 
             // A case that neither ends nor is empty runs on into the next one, and
             // v0.2 draws the cases as independent sections (`V0.2_SPEC.md` §6).
-            if (groups.dropLast(1).any { (_, statements) -> fallsThrough(statements) }) {
+            if (!anyRuleLabel && groups.dropLast(1).any { (_, statements) -> fallsThrough(statements) }) {
                 controlFlowSimplified = true
             }
 
@@ -334,14 +344,23 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
             )
         }
 
-        /** Whether [statements] reach the end of their case instead of leaving it. */
+        /**
+         * Whether [statements] reach the end of their case instead of leaving it.
+         * A braced case (`case 1: { a(); break; }`) leaves through the last
+         * statement of its block, so the block is looked into rather than counted
+         * as an unterminated statement.
+         */
         private fun fallsThrough(statements: List<PsiElement>): Boolean {
             val last = statements.lastOrNull { it !is PsiComment && it !is PsiWhiteSpace } ?: return false
-            return last !is PsiBreakStatement &&
-                last !is PsiContinueStatement &&
-                last !is PsiReturnStatement &&
-                last !is PsiThrowStatement &&
-                last !is PsiYieldStatement
+            return !leavesTheCase(last)
+        }
+
+        private fun leavesTheCase(statement: PsiElement): Boolean = when (statement) {
+            is PsiBreakStatement, is PsiContinueStatement -> true
+            is PsiReturnStatement, is PsiThrowStatement, is PsiYieldStatement -> true
+            is PsiBlockStatement -> statement.codeBlock.statements.lastOrNull()
+                ?.let(::leavesTheCase) ?: false
+            else -> false
         }
 
         private fun walkLoop(element: PsiLoopStatement) {

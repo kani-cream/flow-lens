@@ -336,6 +336,9 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                     // The guard is evaluated as part of choosing this entry, so it
                     // belongs inside the section rather than before the structure.
                     entry.conditions.forEach(::walk)
+                    // `is Foo if check() ->` evaluates the guard to choose this
+                    // entry, so it belongs inside the section too.
+                    entry.guard?.let(::walk)
                     entry.expression?.let(::walk)
                 }
             }

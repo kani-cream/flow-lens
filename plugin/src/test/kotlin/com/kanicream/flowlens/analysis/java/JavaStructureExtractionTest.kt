@@ -279,6 +279,64 @@ class JavaStructureExtractionTest : LightJavaCodeInsightFixtureTestCase() {
         assertTrue(analyzer.extractDirectFlow(method).controlFlowSimplified)
     }
 
+    fun `test a case guard is on the map`() {
+        val file = myFixture.configureByText(
+            "Guard.java",
+            """
+            public class Guard {
+                void run(Object o) {
+                    switch (o) { case Integer i when check(i) -> a(); default -> b(); }
+                }
+                boolean check(int i) { return true; }
+                void a() { } void b() { }
+            }
+            """.trimIndent(),
+        )
+        val method = PsiTreeUtil.findChildrenOfType(file, PsiMethod::class.java).first { it.name == "run" }
+        val switch = analyzer.extractDirectFlow(method).items
+            .filterIsInstance<ExtractedStructure>().single()
+        assertEquals(
+            "the guard is evaluated to choose the case, so it is inside it",
+            listOf("check", "a"),
+            shape(switch.branches[0].items),
+        )
+    }
+
+    fun `test an arrow switch discloses nothing because rules cannot fall through`() {
+        val file = myFixture.configureByText(
+            "Arrow.java",
+            """
+            public class Arrow {
+                void run(int k) {
+                    switch (k) { case 1 -> a(); default -> b(); }
+                }
+                void a() { } void b() { }
+            }
+            """.trimIndent(),
+        )
+        val method = PsiTreeUtil.findChildrenOfType(file, PsiMethod::class.java).first { it.name == "run" }
+        assertFalse(analyzer.extractDirectFlow(method).controlFlowSimplified)
+    }
+
+    fun `test a braced case that breaks discloses nothing`() {
+        val file = myFixture.configureByText(
+            "Braced.java",
+            """
+            public class Braced {
+                void run(int k) {
+                    switch (k) { case 1: { a(); break; } default: b(); }
+                }
+                void a() { } void b() { }
+            }
+            """.trimIndent(),
+        )
+        val method = PsiTreeUtil.findChildrenOfType(file, PsiMethod::class.java).first { it.name == "run" }
+        assertFalse(
+            "the case leaves through the last statement of its block",
+            analyzer.extractDirectFlow(method).controlFlowSimplified,
+        )
+    }
+
     fun `test an arrow switch keeps each rule as its own branch`() {
         val items = itemsOf("switch (subject()) { case 1 -> a(); default -> b(); }")
         assertEquals(
