@@ -550,7 +550,25 @@ dashed connectors are what says so.
 
 ---
 
-## 45. Maintenance rule
+## 45. Only a body written in place is a callback (v0.5)
+
+A callback event is produced for a lambda, a Kotlin trailing lambda, or a Go
+function literal handed to a call. Three near neighbours are not covered:
+
+- a **method reference** (`list.forEach(this::audit)`) — it names a body rather
+  than writing one, and nothing is drawn for it;
+- an **anonymous class or object literal** implementing a functional interface;
+- a **function value held in a variable** and passed on (§42 covers the storing
+  half of this).
+
+The consequence is a real asymmetry: `forEach(x -> audit(x))` shows `audit()`
+under a callback card and `forEach(this::audit)` shows nothing at all. That is
+the same silent omission v0.5 closed for lambdas, still open for these forms,
+and the honest reason it is open is scope rather than difficulty.
+
+---
+
+## 46. Maintenance rule
 
 Whenever dogfooding, fixture testing, Plugin Verifier, or a user report reveals a surprising but currently accepted behavior:
 

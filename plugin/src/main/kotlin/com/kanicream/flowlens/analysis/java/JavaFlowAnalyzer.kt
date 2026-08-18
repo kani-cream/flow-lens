@@ -102,8 +102,11 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
     override fun isAnonymousBody(declaration: PsiElement): Boolean =
         declaration is PsiLambdaExpression
 
-    override fun hasAnalyzableBody(declaration: PsiElement): Boolean =
-        declaration is PsiMethod && declaration.body != null
+    override fun hasAnalyzableBody(declaration: PsiElement): Boolean = when (declaration) {
+        is PsiLambdaExpression -> declaration.body != null
+        is PsiMethod -> declaration.body != null
+        else -> false
+    }
 
     override fun extractDirectFlow(callable: PsiElement): DirectFlowExtraction {
         val extraction = Extractor()
@@ -248,6 +251,9 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
                 // here. It is emitted after the call that received it, carrying
                 // the timing that says when it does run (`V0.5_SPEC.md` §3).
                 is PsiLambdaExpression -> return
+                // A method reference names a body it does not run here either,
+                // but it is not a callback event: v0.5 covers bodies written in
+                // place (`KNOWN_LIMITATIONS.md` §45).
                 is PsiMethodReferenceExpression -> return
                 is PsiClass -> return
                 is PsiMethodCallExpression -> {

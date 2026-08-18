@@ -290,7 +290,9 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
 
         fun walk(element: PsiElement) {
             when (element) {
-                // Boundaries (KNOWN_LIMITATIONS.md section 11).
+                // A lambda does not run where it is written; it is emitted
+                // after the call that received it (`V0.5_SPEC.md` §3). An object
+                // literal is a boundary of a different kind (§45).
                 is KtLambdaExpression, is KtObjectLiteralExpression -> return
                 is KtNamedFunction, is KtClassOrObject -> return
                 is KtCallExpression -> {
