@@ -192,6 +192,14 @@ class V03AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
                 service.progress.collect { it?.currentCallable?.let(seen::add) }
             }
         analyze("void purchase()")
+        // Let the collector catch up before cutting it off: a StateFlow
+        // conflates, and the value this test is about may not have been
+        // delivered yet.
+        runBlocking {
+            withTimeoutOrNull(10_000) {
+                while (!seen.contains("purchase()")) delay(10)
+            }
+        }
         collector.cancel()
 
         assertTrue(

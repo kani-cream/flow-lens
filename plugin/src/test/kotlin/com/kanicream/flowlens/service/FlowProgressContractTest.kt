@@ -51,6 +51,19 @@ class FlowProgressContractTest : LightJavaCodeInsightFixtureTestCase() {
         }
     }
 
+    /**
+     * Waits until the collector has actually observed what it is being asked
+     * about. A StateFlow conflates, and `first {}` returning only means *this*
+     * coroutine saw the value — cancelling the collector at that moment can cut
+     * it off before it was resumed, which is not a contract violation but a race
+     * in the observing.
+     */
+    private suspend fun awaitObserved(timeoutMillis: Long = 10_000, seen: () -> Boolean) {
+        withTimeout(timeoutMillis) {
+            while (!seen()) delay(10)
+        }
+    }
+
     private fun startFromRun(limits: FlowLimits = FlowLimits()): RunId =
         service.startAnalysis(
             myFixture.file.virtualFile,
@@ -66,6 +79,7 @@ class FlowProgressContractTest : LightJavaCodeInsightFixtureTestCase() {
         }
         val runId = startFromRun()
         withTimeout(60_000) { service.results.first { it?.runId == runId && it.isTerminal } }
+        awaitObserved { allSnapshots.any { it.runId == runId && it.isTerminal } }
         collector.cancel()
 
         // Snapshots from an earlier run are not this run's picture.
@@ -93,6 +107,7 @@ class FlowProgressContractTest : LightJavaCodeInsightFixtureTestCase() {
         val terminal = withTimeout(60_000) {
             service.progress.first { it?.runId == runId && it.isTerminal }!!
         }
+        awaitObserved { allEvents.any { it.runId == runId && it.isTerminal } }
         collector.cancel()
 
         // The service keeps the last run's progress until a new analysis starts,
