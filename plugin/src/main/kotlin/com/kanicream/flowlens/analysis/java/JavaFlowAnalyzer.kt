@@ -5,7 +5,20 @@ import com.intellij.psi.JavaTokenType
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiConditionalExpression
+import com.intellij.psi.PsiBlockStatement
+import com.intellij.psi.PsiBreakStatement
+import com.intellij.psi.PsiWhiteSpace
+import com.intellij.psi.PsiYieldStatement
+import com.intellij.psi.PsiSwitchStatement
+import com.intellij.psi.PsiContinueStatement
 import com.intellij.psi.PsiDoWhileStatement
+import com.intellij.psi.PsiForStatement
+import com.intellij.psi.PsiForeachStatement
+import com.intellij.psi.PsiReturnStatement
+import com.intellij.psi.PsiSwitchLabelStatementBase
+import com.intellij.psi.PsiSwitchLabeledRuleStatement
+import com.intellij.psi.PsiThrowStatement
+import com.intellij.psi.PsiWhileStatement
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiIfStatement
@@ -26,13 +39,20 @@ import com.intellij.psi.util.CachedValuesManager
 import com.intellij.psi.util.PsiModificationTracker
 import com.intellij.psi.util.PsiTreeUtil
 import com.kanicream.flowlens.analysis.DirectFlowExtraction
+import com.kanicream.flowlens.analysis.ExtractedBranch
 import com.kanicream.flowlens.analysis.ExtractedCall
+import com.kanicream.flowlens.analysis.ExtractedStructure
+import com.kanicream.flowlens.analysis.ExtractedTerminator
+import com.kanicream.flowlens.analysis.FlowItem
+import com.kanicream.flowlens.analysis.SourceSummary
 import com.kanicream.flowlens.analysis.FlowLanguageAnalyzer
 import com.kanicream.flowlens.analysis.TargetClassifier
 import com.kanicream.flowlens.analysis.ResolvedCallTarget
+import com.kanicream.flowlens.core.model.BranchKind
 import com.kanicream.flowlens.core.model.DispatchConfidence
 import com.kanicream.flowlens.core.model.FlowNodeKind
 import com.kanicream.flowlens.core.model.FlowSymbol
+import com.kanicream.flowlens.service.FlowMetadata
 
 /**
  * Java analyzer: explicit method calls, constructor calls, and explicit
@@ -64,7 +84,7 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
         val method = callable as PsiMethod
         val extraction = Extractor()
         method.body?.let(extraction::walk)
-        return DirectFlowExtraction(extraction.calls, extraction.controlFlowSimplified)
+        return DirectFlowExtraction(extraction.items(), extraction.controlFlowSimplified)
     }
 
     override fun resolveCall(call: ExtractedCall): ResolvedCallTarget {
@@ -162,13 +182,34 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
         )
     }
 
-    /** Post-order walk producing Java evaluation order; lambda and class bodies are boundaries. */
+    /**
+     * Walks a body in Java evaluation order, emitting calls, control structures
+     * with their branches, and terminators. Lambda and class bodies are
+     * traversal boundaries.
+     *
+     * Code evaluated before a structure is entered — a condition, a switch
+     * selector, a loop initializer — is emitted before the structure; code that
+     * repeats or is chosen between lives inside it (`V0.2_SPEC.md` §4).
+     */
     private class Extractor {
-        val calls = mutableListOf<ExtractedCall>()
-        var controlFlowSimplified = false
+        private val root = mutableListOf<FlowItem>()
+        private var sink: MutableList<FlowItem> = root
 
-        /** > 0 while walking code that may not execute (branch, loop body, catch). */
+        /** Set only by control flow this analyzer does not represent. */
+        var controlFlowSimplified = false
+            private set
+
+        /** > 0 while walking a short-circuit operand, which has no structure. */
         private var conditionalDepth = 0
+
+        /**
+         * Calls extracted so far. The disclosure in §6 is about flow the map does
+         * not show, so a construct only earns it when a call actually sits in the
+         * part that is not represented: `a != null && b > 0` hides nothing.
+         */
+        private var callsExtracted = 0
+
+        fun items(): List<FlowItem> = root.toList()
 
         fun walk(element: PsiElement) {
             when (element) {
@@ -189,80 +230,260 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
                 is PsiNewExpression -> {
                     element.qualifier?.let(::walk)
                     element.argumentList?.expressions?.forEach(::walk)
-                    // An anonymous class body is a boundary; its arguments were walked above.
                     addCall(
                         element,
                         FlowNodeKind.CONSTRUCTOR,
                         element.classReference?.referenceName ?: "new",
                     )
                 }
-                is PsiIfStatement -> {
-                    controlFlowSimplified = true
-                    element.condition?.let(::walk)
-                    conditional { element.thenBranch?.let(::walk); element.elseBranch?.let(::walk) }
+                is PsiIfStatement -> walkIf(element)
+                is PsiConditionalExpression -> walkTernary(element)
+                is PsiSwitchBlock -> walkSwitch(element)
+                is PsiLoopStatement -> walkLoop(element)
+                is PsiTryStatement -> walkTry(element)
+                is PsiReturnStatement -> {
+                    element.returnValue?.let(::walk)
+                    sink += ExtractedTerminator(FlowNodeKind.RETURN, element)
                 }
-                is PsiConditionalExpression -> {
-                    controlFlowSimplified = true
-                    walk(element.condition)
-                    conditional { element.thenExpression?.let(::walk); element.elseExpression?.let(::walk) }
+                is PsiThrowStatement -> {
+                    element.exception?.let(::walk)
+                    sink += ExtractedTerminator(FlowNodeKind.THROW, element)
                 }
-                is PsiDoWhileStatement -> {
-                    controlFlowSimplified = true
-                    // A do-while body and its condition both run at least once.
-                    element.children.forEach(::walk)
-                }
-                is PsiLoopStatement -> {
-                    controlFlowSimplified = true
-                    // Everything but the loop body is walked in place; the body may
-                    // run zero times.
-                    element.children.filter { it !== element.body }.forEach(::walk)
-                    conditional { element.body?.let(::walk) }
-                }
-                is PsiSwitchBlock -> {
-                    controlFlowSimplified = true
-                    element.expression?.let(::walk)
-                    conditional { element.body?.let(::walk) }
-                }
-                is PsiTryStatement -> {
-                    controlFlowSimplified = true
-                    // try and finally blocks run; catch sections only on failure.
-                    element.resourceList?.let(::walk)
-                    element.tryBlock?.let(::walk)
-                    conditional { element.catchSections.forEach(::walk) }
-                    element.finallyBlock?.let(::walk)
-                }
-                is PsiPolyadicExpression -> {
-                    val shortCircuit = element.operationTokenType == JavaTokenType.ANDAND ||
-                        element.operationTokenType == JavaTokenType.OROR
-                    if (!shortCircuit) {
-                        element.children.forEach(::walk)
-                        return
+                is PsiBreakStatement -> {
+                    // A `break` that ends a switch case is already expressed by the
+                    // case boundary. Only a jump the map does not show — out of a
+                    // loop, or to a label — earns the disclosure (`V0.2_SPEC.md` §6).
+                    if (element.findExitedStatement() !is PsiSwitchStatement) {
+                        controlFlowSimplified = true
                     }
-                    controlFlowSimplified = true
-                    val operands = element.operands
-                    operands.firstOrNull()?.let(::walk)
-                    conditional { operands.drop(1).forEach(::walk) }
                 }
+                is PsiContinueStatement -> controlFlowSimplified = true
+                is PsiPolyadicExpression -> walkPolyadic(element)
                 else -> element.children.forEach(::walk)
             }
         }
 
+        private fun walkIf(element: PsiIfStatement) {
+            element.condition?.let(::walk)
+            val branches = mutableListOf<ExtractedBranch>()
+            branches += branch(BranchKind.THEN, null) { element.thenBranch?.let(::walk) }
+            element.elseBranch?.let { elseBranch ->
+                branches += branch(BranchKind.ELSE, null) { walk(elseBranch) }
+            }
+            sink += ExtractedStructure(
+                kind = FlowNodeKind.CONDITION,
+                anchor = element,
+                summary = SourceSummary.of(element.condition?.text),
+                branches = branches,
+            )
+        }
+
+        private fun walkTernary(element: PsiConditionalExpression) {
+            walk(element.condition)
+            sink += ExtractedStructure(
+                kind = FlowNodeKind.CONDITION,
+                anchor = element,
+                summary = SourceSummary.of(element.condition.text),
+                branches = listOf(
+                    branch(BranchKind.THEN, null) { element.thenExpression?.let(::walk) },
+                    branch(BranchKind.ELSE, null) { element.elseExpression?.let(::walk) },
+                ),
+            )
+        }
+
+        private fun walkSwitch(element: PsiSwitchBlock) {
+            element.expression?.let(::walk)
+            // `case 1 -> f();` cannot fall through, so the check below does not
+            // apply to a rule-style switch at all.
+            var anyRuleLabel = false
+            val groups = mutableListOf<Pair<PsiSwitchLabelStatementBase?, List<PsiElement>>>()
+            var current: MutableList<PsiElement>? = null
+            var currentLabel: PsiSwitchLabelStatementBase? = null
+            fun flush() {
+                val statements = current ?: return
+                groups += currentLabel to statements.toList()
+            }
+            for (child in element.body?.children.orEmpty()) {
+                when (child) {
+                    is PsiSwitchLabelStatementBase -> {
+                        flush()
+                        currentLabel = child
+                        current = mutableListOf()
+                        // A guard (`case Integer i when check(i)`) is evaluated to
+                        // choose this case, so it belongs inside the section.
+                        child.guardExpression?.let { current?.add(it) }
+                        // A rule-style label (`case 1 -> f();`) carries its body.
+                        (child as? PsiSwitchLabeledRuleStatement)?.let {
+                            anyRuleLabel = true
+                            it.body?.let { body -> current?.add(body) }
+                        }
+                    }
+                    is PsiComment -> Unit
+                    else -> current?.add(child)
+                }
+            }
+            flush()
+
+            // A case that neither ends nor is empty runs on into the next one, and
+            // v0.2 draws the cases as independent sections (`V0.2_SPEC.md` §6).
+            if (!anyRuleLabel && groups.dropLast(1).any { (_, statements) -> fallsThrough(statements) }) {
+                controlFlowSimplified = true
+            }
+
+            val branches = groups.map { (label, statements) ->
+                branch(
+                    if (label?.isDefaultCase == true) BranchKind.DEFAULT else BranchKind.CASE,
+                    labelTextOf(label),
+                ) { statements.forEach(::walk) }
+            }
+            sink += ExtractedStructure(
+                kind = FlowNodeKind.SWITCH,
+                anchor = element,
+                summary = SourceSummary.of(element.expression?.text),
+                branches = branches,
+            )
+        }
+
+        /**
+         * Whether [statements] reach the end of their case instead of leaving it.
+         * A braced case (`case 1: { a(); break; }`) leaves through the last
+         * statement of its block, so the block is looked into rather than counted
+         * as an unterminated statement.
+         */
+        private fun fallsThrough(statements: List<PsiElement>): Boolean {
+            val last = statements.lastOrNull { it !is PsiComment && it !is PsiWhiteSpace } ?: return false
+            return !leavesTheCase(last)
+        }
+
+        private fun leavesTheCase(statement: PsiElement): Boolean = when (statement) {
+            is PsiBreakStatement, is PsiContinueStatement -> true
+            is PsiReturnStatement, is PsiThrowStatement, is PsiYieldStatement -> true
+            is PsiBlockStatement -> statement.codeBlock.statements.lastOrNull()
+                ?.let(::leavesTheCase) ?: false
+            else -> false
+        }
+
+        private fun walkLoop(element: PsiLoopStatement) {
+            // Whatever runs once before the loop is emitted before the container.
+            when (element) {
+                is PsiForStatement -> element.initialization?.let(::walk)
+                is PsiForeachStatement -> element.iteratedValue?.let(::walk)
+                else -> Unit
+            }
+            val body = branch(BranchKind.BODY, null) {
+                // Everything evaluated per iteration belongs inside, in source
+                // order: condition, body, then update.
+                when (element) {
+                    is PsiForStatement -> {
+                        element.condition?.let(::walk)
+                        element.body?.let(::walk)
+                        element.update?.let(::walk)
+                    }
+                    is PsiWhileStatement -> {
+                        element.condition?.let(::walk)
+                        element.body?.let(::walk)
+                    }
+                    is PsiDoWhileStatement -> {
+                        element.body?.let(::walk)
+                        element.condition?.let(::walk)
+                    }
+                    else -> element.body?.let(::walk)
+                }
+            }
+            sink += ExtractedStructure(
+                kind = FlowNodeKind.LOOP,
+                anchor = element,
+                summary = SourceSummary.of(loopHeaderOf(element)),
+                branches = listOf(body),
+                metadata = if (element is PsiDoWhileStatement) {
+                    mapOf(FlowMetadata.LOOP_RUNS_AT_LEAST_ONCE to "true")
+                } else {
+                    emptyMap()
+                },
+            )
+        }
+
+        private fun walkTry(element: PsiTryStatement) {
+            element.resourceList?.let(::walk)
+            val branches = mutableListOf<ExtractedBranch>()
+            branches += branch(BranchKind.TRY, null) { element.tryBlock?.let(::walk) }
+            for (section in element.catchSections) {
+                branches += branch(
+                    BranchKind.CATCH,
+                    SourceSummary.of(section.catchType?.presentableText),
+                ) { section.catchBlock?.let(::walk) }
+            }
+            element.finallyBlock?.let { finally ->
+                branches += branch(BranchKind.FINALLY, null) { walk(finally) }
+            }
+            sink += ExtractedStructure(
+                kind = FlowNodeKind.TRY,
+                anchor = element,
+                summary = null,
+                branches = branches,
+            )
+        }
+
+        private fun walkPolyadic(element: PsiPolyadicExpression) {
+            val shortCircuit = element.operationTokenType == JavaTokenType.ANDAND ||
+                element.operationTokenType == JavaTokenType.OROR
+            if (!shortCircuit) {
+                element.children.forEach(::walk)
+                return
+            }
+            // An operand that may never be evaluated is marked rather than given
+            // a structure of its own (`V0.2_SPEC.md` §2).
+            val operands = element.operands
+            operands.firstOrNull()?.let(::walk)
+            val before = callsExtracted
+            conditionalDepth += 1
+            try {
+                operands.drop(1).forEach(::walk)
+            } finally {
+                conditionalDepth -= 1
+            }
+            if (callsExtracted > before) controlFlowSimplified = true
+        }
+
+        private fun labelTextOf(label: PsiSwitchLabelStatementBase?): String? {
+            if (label == null || label.isDefaultCase) return null
+            return SourceSummary.of(label.caseLabelElementList?.text)
+        }
+
+        private fun loopHeaderOf(element: PsiLoopStatement): String? = when (element) {
+            is PsiForeachStatement ->
+                "${element.iterationParameter.name} : ${element.iteratedValue?.text.orEmpty()}"
+            is PsiWhileStatement -> element.condition?.text
+            is PsiDoWhileStatement -> element.condition?.text
+            is PsiForStatement -> element.condition?.text
+            else -> null
+        }
+
+        /** Collects everything [collect] emits into a new labelled section. */
+        private inline fun branch(
+            kind: BranchKind,
+            label: String?,
+            collect: () -> Unit,
+        ): ExtractedBranch {
+            val previous = sink
+            val collected = mutableListOf<FlowItem>()
+            sink = collected
+            try {
+                collect()
+            } finally {
+                sink = previous
+            }
+            return ExtractedBranch(kind, label, collected.toList())
+        }
+
         private fun addCall(callSite: PsiElement, kind: FlowNodeKind, shortName: String) {
-            calls += ExtractedCall(
+            callsExtracted += 1
+            sink += ExtractedCall(
                 callSite = callSite,
                 kind = kind,
                 calleeShortName = shortName,
                 conditional = conditionalDepth > 0,
             )
-        }
-
-        private inline fun conditional(block: () -> Unit) {
-            conditionalDepth += 1
-            try {
-                block()
-            } finally {
-                conditionalDepth -= 1
-            }
         }
     }
 }

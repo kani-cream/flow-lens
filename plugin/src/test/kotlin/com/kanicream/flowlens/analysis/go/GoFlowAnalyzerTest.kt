@@ -137,7 +137,7 @@ class GoFlowAnalyzerTest : BasePlatformTestCase() {
         assertEquals(listOf("f"), callNames(extraction))
     }
 
-    fun `test switch marks control flow simplified`() {
+    fun `test a switch is represented rather than reported as simplified`() {
         val extraction = extractionOf(
             """
             package sample
@@ -152,7 +152,7 @@ class GoFlowAnalyzerTest : BasePlatformTestCase() {
             }
             """.trimIndent(),
         )
-        assertTrue(extraction.controlFlowSimplified)
+        assertFalse("v0.2 represents the switch itself", extraction.controlFlowSimplified)
         assertEquals(listOf("a"), callNames(extraction))
     }
 

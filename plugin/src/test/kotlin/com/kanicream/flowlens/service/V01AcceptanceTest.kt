@@ -263,23 +263,43 @@ class V01AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(FlowNodeKind.LIMIT, result.rootFrame!!.events.last().kind)
     }
 
-    fun `test S control flow is disclosed as simplified`() {
+    fun `test S control flow that is not represented stays disclosed`() {
+        // v0.2 represents branches, so the disclosure now means something
+        // specific: this body short-circuits, which v0.2 does not model.
         val result = analyze(
             "S.java",
             """
             public class S {
+                void run() { boolean x = a() && b(); }
+                boolean a() { return true; }
+                boolean b() { return true; }
+            }
+            """.trimIndent(),
+            "void run()",
+        )
+        assertTrue(result.controlFlowIncomplete)
+        val cards = CanvasViewModelBuilder.build(result, emptySet())!!.cards
+        assertTrue(
+            "the operand that may be skipped must not use the certain connector",
+            cards.last().dashedIncomingConnector,
+        )
+    }
+
+    fun `test a represented branch no longer reports simplified control flow`() {
+        val result = analyze(
+            "Branchy.java",
+            """
+            public class Branchy {
                 void run(boolean flag) { if (flag) { a(); } else { b(); } }
                 void a() { } void b() { }
             }
             """.trimIndent(),
             "void run(boolean flag)",
         )
-        assertTrue(result.controlFlowIncomplete)
-        val cards = CanvasViewModelBuilder.build(result, emptySet())!!.cards
-        assertTrue(
-            "conditional calls must not use the certain connector",
-            cards.all { it.dashedIncomingConnector },
-        )
+        assertFalse(result.controlFlowIncomplete)
+        val structure = result.rootFrame!!.events.single()
+        assertEquals(FlowNodeKind.CONDITION, structure.kind)
+        assertEquals(2, structure.branches.size)
     }
 
     fun `test T initial canvas expands the root and collapses child frames`() {

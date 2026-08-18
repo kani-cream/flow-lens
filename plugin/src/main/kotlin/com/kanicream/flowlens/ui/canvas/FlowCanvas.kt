@@ -275,8 +275,12 @@ class FlowCanvas : JComponent() {
      * would look exactly like one that always runs.
      */
     private fun paintCards(g2: Graphics2D, frame: FrameVM, bodyTop: Int) {
+        paintCardSequence(g2, frame.cards, bodyTop)
+    }
+
+    private fun paintCardSequence(g2: Graphics2D, cards: List<CardVM>, bodyTop: Int) {
         var previous: CardVM? = null
-        for (card in frame.cards) {
+        for (card in cards) {
             if (previous == null) {
                 if (card.dashedIncomingConnector) paintLeadIn(g2, card, bodyTop)
             } else {
@@ -301,6 +305,35 @@ class FlowCanvas : JComponent() {
             intArrayOf(yEnd - 6, yEnd - 6, yEnd - 1),
             3,
         )
+    }
+
+    /**
+     * A structure's labelled sections, stacked inside its container. Each label
+     * row names the section, and an empty one says so rather than leaving a gap
+     * that reads as a rendering fault.
+     */
+    private fun paintSections(g2: Graphics2D, card: CardVM) {
+        for (section in card.sections) {
+            val title = section.titleBounds
+            g2.color = Palette.sectionRule
+            g2.stroke = SOLID_STROKE
+            g2.drawLine(title.x, title.y + title.height - 4, title.x + title.width, title.y + title.height - 4)
+            g2.font = JBUI.Fonts.miniFont().asBold()
+            g2.color = Palette.sectionLabel
+            g2.drawString(section.title, title.x + 2, title.y + title.height - 8)
+
+            if (section.cards.isEmpty()) {
+                g2.font = JBUI.Fonts.smallFont()
+                g2.color = Palette.mutedText
+                g2.drawString(
+                    FlowLensBundle.message("branch.empty"),
+                    title.x + 14,
+                    title.y + title.height + 10,
+                )
+                continue
+            }
+            paintCardSequence(g2, section.cards, bodyTop = title.y + title.height)
+        }
     }
 
     /** Explicit continuation marker: more code exists but was not analyzed. */
@@ -356,6 +389,10 @@ class FlowCanvas : JComponent() {
     private fun paintCardTree(g2: Graphics2D, card: CardVM) {
         paintCardBox(g2, card)
         paintCardContent(g2, card)
+        if (card.isStructure) {
+            paintSections(g2, card)
+            return
+        }
         val body = card.childFrame ?: return
         // Separator between the call's own header and the body it contains.
         val header = card.bounds
@@ -459,6 +496,8 @@ class FlowCanvas : JComponent() {
 
     private fun cardBackground(style: CardStyle): Color = when (style) {
         CardStyle.ENTRY -> Palette.rootFrameBg
+        CardStyle.STRUCTURE -> Palette.structureBg
+        CardStyle.TERMINATOR -> Palette.terminatorBg
         CardStyle.EXTERNAL -> Palette.externalBg
         CardStyle.BUILT_IN -> Palette.externalBg
         CardStyle.UNRESOLVED -> Palette.unresolvedBg
@@ -468,6 +507,7 @@ class FlowCanvas : JComponent() {
     }
 
     private fun cardBorder(style: CardStyle): Color = when (style) {
+        CardStyle.STRUCTURE -> Palette.structureBorder
         CardStyle.DECLARED_TARGET -> Palette.declaredBorder
         CardStyle.EXTERNAL, CardStyle.BUILT_IN -> Palette.externalBorder
         else -> Palette.cardBorder
@@ -687,6 +727,11 @@ class FlowCanvas : JComponent() {
 
     private object Palette {
         val cardBg = JBColor(Color(0xF7F8FA), Color(0x2B2D30))
+        val structureBg = JBColor(Color(0xF4F1FA), Color(0x2C2A33))
+        val structureBorder = JBColor(Color(0xA694CC), Color(0x7A6BA8))
+        val terminatorBg = JBColor(Color(0xF0F1F3), Color(0x2A2C2F))
+        val sectionRule = JBColor(Color(0xD7D9DE), Color(0x45484D))
+        val sectionLabel = JBColor(Color(0x5A5D66), Color(0x9DA0A8))
         val cardBorder = JBColor(Color(0xC9CDD6), Color(0x4E5157))
         val rootFrameBg = JBColor(Color(0xEDF3FF), Color(0x25324D))
         val rootFrameBorder = JBColor(Color(0x4A88E8), Color(0x548AF7))

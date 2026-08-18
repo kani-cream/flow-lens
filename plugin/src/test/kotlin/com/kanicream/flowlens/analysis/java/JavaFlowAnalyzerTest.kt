@@ -227,14 +227,14 @@ class JavaFlowAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(ResolutionStatus.PROJECT_LOCAL, second.resolutionStatus)
     }
 
-    fun `test calls inside if mark control flow simplified`() {
+    fun `test an if is represented rather than reported as simplified`() {
         val extraction = extractionOf(
             """
             void run(boolean flag) { if (flag) { a(); } }
             void a() {}
             """.trimIndent(),
         )
-        assertTrue(extraction.controlFlowSimplified)
+        assertFalse("v0.2 represents the branch itself", extraction.controlFlowSimplified)
         assertEquals(listOf("a"), callNames(extraction))
     }
 

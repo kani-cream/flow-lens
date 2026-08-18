@@ -4,6 +4,7 @@ import com.kanicream.flowlens.FlowLensBundle
 import com.kanicream.flowlens.core.model.DispatchConfidence
 import com.kanicream.flowlens.core.model.ExecutionMode
 import com.kanicream.flowlens.core.model.FlowAnalysisResult
+import com.kanicream.flowlens.core.model.FlowBranch
 import com.kanicream.flowlens.core.model.FlowFrame
 import com.kanicream.flowlens.core.model.FlowNode
 import com.kanicream.flowlens.core.model.FlowNodeKind
@@ -18,6 +19,8 @@ import java.awt.Rectangle
 /** Visual treatment category of a card; states stay distinguishable without color alone. */
 enum class CardStyle {
     ENTRY,
+    STRUCTURE,
+    TERMINATOR,
     PROJECT_CALL,
     DECLARED_TARGET,
     AMBIGUOUS,
@@ -51,6 +54,8 @@ class CardVM(
     val depthLimited: Boolean,
     val callsInside: Int,
     val childFrame: FrameVM?,
+    /** Labelled sections of a structural card, laid out inside its container. */
+    val sections: List<SectionVM> = emptyList(),
 ) {
     val nodeId: NodeId get() = node.id
 
@@ -65,7 +70,10 @@ class CardVM(
      */
     var containerBounds: Rectangle = Rectangle()
 
-    val expandedInline: Boolean get() = childFrame != null
+    val expandedInline: Boolean get() = childFrame != null || sections.isNotEmpty()
+
+    /** True when this card is a control structure rather than a step. */
+    val isStructure: Boolean get() = sections.isNotEmpty()
 
     /**
      * The clickable expand/collapse control at the right of the line. Expansion
@@ -89,6 +97,21 @@ class CardVM(
     val occupiedBottom: Int
         get() = containerBounds.y + containerBounds.height +
             if (depthLimited) CanvasMetrics.LIMIT_STUB_HEIGHT else 0
+}
+
+/**
+ * One labelled section inside a structural card: a `then`, a `case`, a loop
+ * body. An empty section is still drawn, so "this case does nothing" stays
+ * visible (`V0.2_SPEC.md` §7).
+ */
+class SectionVM(
+    val title: String,
+    val cards: List<CardVM>,
+) {
+    var bounds: Rectangle = Rectangle()
+
+    /** The label row; the section's cards are laid out under it. */
+    var titleBounds: Rectangle = Rectangle()
 }
 
 /** One rendered frame container (analyzed callable body). */
@@ -150,6 +173,12 @@ object CanvasMetrics {
     /** Space between an expanded call's header and the body drawn inside it. */
     const val NESTED_TOP_GAP = 10
     const val NESTED_BOTTOM_PAD = 12
+
+    /** The label row of a branch section, and the inset of its contents. */
+    const val SECTION_TITLE_HEIGHT = 18
+    const val SECTION_GAP = 6
+    /** Height reserved for a section that contains nothing. */
+    const val EMPTY_SECTION_HEIGHT = 14
 }
 
 /**
@@ -176,13 +205,14 @@ object CanvasViewModelBuilder {
     /** All cards currently visible, in top-to-bottom layout order, for keyboard navigation. */
     fun visibleCards(root: FrameVM?): List<CardVM> {
         val out = mutableListOf<CardVM>()
-        fun collect(frame: FrameVM) {
-            for (card in frame.cards) {
+        fun collectCards(cards: List<CardVM>) {
+            for (card in cards) {
                 out += card
-                card.childFrame?.let(::collect)
+                card.sections.forEach { collectCards(it.cards) }
+                card.childFrame?.let { collectCards(it.cards) }
             }
         }
-        root?.let(::collect)
+        root?.let { collectCards(it.cards) }
         return out
     }
 
@@ -230,6 +260,12 @@ object CanvasViewModelBuilder {
         val childFrame = node.targetFrameId?.let(result::frame)
         val expandable = childFrame != null && childFrame.events.isNotEmpty()
         val expanded = expandable && node.id in expandedNodes
+        val sections = node.branches.map { branch ->
+            SectionVM(
+                title = sectionTitleOf(branch),
+                cards = branch.events.map { event -> cardVM(result, event, expandedNodes, ownerType) },
+            )
+        }
         val childVM = if (expanded && childFrame != null) {
             frameVM(result, childFrame, expandedNodes, isRoot = false)
         } else {
@@ -270,11 +306,20 @@ object CanvasViewModelBuilder {
             depthLimited = node.metadata[FlowMetadata.LIMIT] == FlowMetadata.LIMIT_DEPTH,
             callsInside = childFrame?.events?.size ?: 0,
             childFrame = childVM,
+            sections = sections,
         )
+    }
+
+    /** `THEN`, `CASE 1`, `catch (IOException)`: the kind, plus its source label. */
+    private fun sectionTitleOf(branch: FlowBranch): String {
+        val kind = FlowLensBundle.message("branch.kind.${branch.kind.name}")
+        return branch.label?.let { "$kind $it" } ?: kind
     }
 
     private fun styleOf(node: FlowNode): CardStyle = when {
         node.kind == FlowNodeKind.ENTRY -> CardStyle.ENTRY
+        node.isStructure -> CardStyle.STRUCTURE
+        node.kind == FlowNodeKind.RETURN || node.kind == FlowNodeKind.THROW -> CardStyle.TERMINATOR
         node.kind == FlowNodeKind.CYCLE -> CardStyle.CYCLE
         node.kind == FlowNodeKind.LIMIT -> CardStyle.LIMIT
         node.resolutionStatus == ResolutionStatus.UNRESOLVED -> CardStyle.UNRESOLVED
@@ -292,6 +337,10 @@ object CanvasViewModelBuilder {
      * into a signal that the call leaves the current type.
      */
     private fun titleOf(node: FlowNode, ownerType: String?): String = when (node.kind) {
+        FlowNodeKind.CONDITION, FlowNodeKind.SWITCH, FlowNodeKind.LOOP, FlowNodeKind.TRY ->
+            structureTitleOf(node)
+        FlowNodeKind.RETURN, FlowNodeKind.THROW ->
+            FlowLensBundle.message("card.kind.${node.kind.name}")
         FlowNodeKind.LIMIT -> FlowLensBundle.message("card.limit.node")
         FlowNodeKind.CYCLE -> FlowLensBundle.message(
             "card.cycle.label", node.targetSymbol?.displayName ?: "?",
@@ -308,10 +357,31 @@ object CanvasViewModelBuilder {
     }
 
     /**
+     * A structure names what it decides on: the condition, the switch subject,
+     * the loop header. A `select` says so, and a `do`-`while` says its body runs
+     * at least once, because neither is visible from the summary alone.
+     */
+    private fun structureTitleOf(node: FlowNode): String {
+        val kindKey = when {
+            node.metadata[FlowMetadata.SELECT] == "true" -> "card.kind.SELECT"
+            node.metadata[FlowMetadata.LOOP_RUNS_AT_LEAST_ONCE] == "true" -> "card.kind.LOOP_ONCE"
+            else -> "card.kind.${node.kind.name}"
+        }
+        val kind = FlowLensBundle.message(kindKey)
+        return node.structureSummary?.let { "$kind $it" } ?: kind
+    }
+
+    /**
      * Card style already carries external, unresolved, and ambiguous states
      * through the box treatment, so only what the box cannot say gets a glyph.
      */
     private fun stateGlyphOf(node: FlowNode, style: CardStyle): String? = when {
+        node.kind == FlowNodeKind.CONDITION -> "◆"
+        node.kind == FlowNodeKind.SWITCH -> "◈"
+        node.kind == FlowNodeKind.LOOP -> "↻"
+        node.kind == FlowNodeKind.TRY -> "⛨"
+        node.kind == FlowNodeKind.RETURN -> "◀"
+        node.kind == FlowNodeKind.THROW -> "✖"
         style == CardStyle.UNRESOLVED -> "?"
         style == CardStyle.AMBIGUOUS -> "◇"
         style == CardStyle.DECLARED_TARGET -> "◆"
@@ -355,10 +425,14 @@ object CanvasViewModelBuilder {
     private fun measureFrameWidth(frame: FrameVM): Int =
         frame.cards.maxOfOrNull(::measureCardWidth) ?: CanvasMetrics.CARD_WIDTH
 
-    private fun measureCardWidth(card: CardVM): Int =
-        card.childFrame
-            ?.let { measureFrameWidth(it) + 2 * CanvasMetrics.CHILD_INDENT }
-            ?: CanvasMetrics.CARD_WIDTH
+    private fun measureCardWidth(card: CardVM): Int {
+        val body = card.childFrame?.let { measureFrameWidth(it) }
+        val sections = card.sections
+            .mapNotNull { section -> section.cards.maxOfOrNull(::measureCardWidth) }
+            .maxOrNull()
+        val inner = listOfNotNull(body, sections).maxOrNull() ?: return CanvasMetrics.CARD_WIDTH
+        return inner + 2 * CanvasMetrics.CHILD_INDENT
+    }
 
     /**
      * Assigns bounds top to bottom and returns the frame's occupied rectangle.
@@ -373,9 +447,45 @@ object CanvasViewModelBuilder {
         withHeader: Boolean,
     ): Rectangle {
         val contentWidth = measureFrameWidth(frame)
-        val cardX = x + padding
-        var cursorY = y + padding + if (withHeader) CanvasMetrics.FRAME_HEADER else 0
-        frame.cards.forEachIndexed { index, card ->
+        val top = y + padding + if (withHeader) CanvasMetrics.FRAME_HEADER else 0
+        val bottom = layoutCards(frame.cards, x + padding, top, contentWidth)
+        frame.bounds = Rectangle(x, y, contentWidth + padding * 2, bottom - y + padding)
+        return frame.bounds
+    }
+
+    /**
+     * Lays a structure's sections inside its container: a label row, then the
+     * section's own cards indented under it. An empty section still occupies a
+     * row so "this case does nothing" stays visible.
+     */
+    private fun layoutSections(card: CardVM, cardX: Int, headerBottom: Int, width: Int): Int {
+        var cursorY = headerBottom + CanvasMetrics.NESTED_TOP_GAP
+        val innerX = cardX + CanvasMetrics.CHILD_INDENT
+        val innerWidth = width - 2 * CanvasMetrics.CHILD_INDENT
+        for (section in card.sections) {
+            val sectionTop = cursorY
+            section.titleBounds =
+                Rectangle(innerX, cursorY, innerWidth, CanvasMetrics.SECTION_TITLE_HEIGHT)
+            cursorY += CanvasMetrics.SECTION_TITLE_HEIGHT
+            cursorY = if (section.cards.isEmpty()) {
+                cursorY + CanvasMetrics.EMPTY_SECTION_HEIGHT
+            } else {
+                layoutCards(section.cards, innerX, cursorY, innerWidth)
+            }
+            section.bounds = Rectangle(innerX, sectionTop, innerWidth, cursorY - sectionTop)
+            cursorY += CanvasMetrics.SECTION_GAP
+        }
+        return cursorY - CanvasMetrics.SECTION_GAP + CanvasMetrics.NESTED_BOTTOM_PAD
+    }
+
+    /**
+     * Lays out one sequence of cards top to bottom and returns where it ends.
+     * A frame's body and a branch section are the same thing at this level, so
+     * both use it.
+     */
+    private fun layoutCards(cards: List<CardVM>, cardX: Int, top: Int, contentWidth: Int): Int {
+        var cursorY = top
+        cards.forEachIndexed { index, card ->
             if (index > 0) {
                 cursorY += if (card.boundaryBeforeCard) {
                     CanvasMetrics.BOUNDARY_GAP
@@ -383,12 +493,15 @@ object CanvasViewModelBuilder {
                     CanvasMetrics.CONNECTOR_GAP
                 }
             }
-            val headerHeight = CanvasMetrics.CARD_HEIGHT
-            card.bounds = Rectangle(cardX, cursorY, contentWidth, headerHeight)
-            cursorY += headerHeight
+            card.bounds = Rectangle(cardX, cursorY, contentWidth, CanvasMetrics.CARD_HEIGHT)
+            cursorY += CanvasMetrics.CARD_HEIGHT
 
             val body = card.childFrame
-            if (body == null) {
+            if (card.sections.isNotEmpty()) {
+                cursorY = layoutSections(card, cardX, cursorY, contentWidth)
+                card.containerBounds =
+                    Rectangle(cardX, card.bounds.y, contentWidth, cursorY - card.bounds.y)
+            } else if (body == null) {
                 card.containerBounds = Rectangle(card.bounds)
             } else {
                 // The body is inset by CHILD_INDENT on both sides, which is why
@@ -408,7 +521,6 @@ object CanvasViewModelBuilder {
             // explicit continuation marker: a connector never just stops.
             if (card.depthLimited) cursorY += CanvasMetrics.LIMIT_STUB_HEIGHT
         }
-        frame.bounds = Rectangle(x, y, contentWidth + padding * 2, cursorY - y + padding)
-        return frame.bounds
+        return cursorY
     }
 }

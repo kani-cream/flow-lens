@@ -1,5 +1,6 @@
 package com.kanicream.flowlens
 
+import com.kanicream.flowlens.core.model.BranchKind
 import com.kanicream.flowlens.core.model.DispatchConfidence
 import com.kanicream.flowlens.core.model.ExecutionMode
 import com.kanicream.flowlens.core.model.FlowNodeKind
@@ -44,6 +45,20 @@ class FlowLensBundleParityTest {
             FlowResultStatus.entries.forEach { add("enum.result.${it.name}") }
             FlowNodeKind.entries.forEach { add("enum.kind.${it.name}") }
             FlowProgressStage.entries.forEach { add("status.stage.${it.name}") }
+            // A structure names its own kind on the card, and every section is
+            // labelled, so both enums are user-visible (guardrails §14).
+            BranchKind.entries.forEach { add("branch.kind.${it.name}") }
+            listOf(
+                FlowNodeKind.CONDITION,
+                FlowNodeKind.SWITCH,
+                FlowNodeKind.LOOP,
+                FlowNodeKind.TRY,
+                FlowNodeKind.RETURN,
+                FlowNodeKind.THROW,
+            ).forEach { add("card.kind.${it.name}") }
+            add("card.kind.SELECT")
+            add("card.kind.LOOP_ONCE")
+            add("branch.empty")
         }
         val missing = required.filterNot { en.containsKey(it) }
         assertTrue("missing bundle keys: $missing", missing.isEmpty())
