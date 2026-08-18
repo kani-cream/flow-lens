@@ -491,7 +491,32 @@ If a benchmark reveals platform-specific outliers, record them as a known limita
 
 ---
 
-## 18. Definition of Done impact
+## 18. CI is a gate, not a debugger
+
+The private repository has a limited pool of GitHub Actions minutes, and a CI
+run costs the whole team's budget. Push when the work is finished, not to find
+out whether it is.
+
+Before a push that triggers CI:
+
+1. **Reproduce any failure locally.** If it cannot be reproduced, say why — a
+   timing window that only opens on a slower machine is a real answer; "it
+   passed here" is not.
+2. **Enumerate before fixing.** A race has a shape: list every window in the
+   function and the state transitions around it, then close all of them. Fixing
+   the one instance that the failure happened to expose is how one CI run
+   becomes three.
+3. **Rerun from scratch.** `--rerun-tasks` over the whole suite, more than once.
+   An up-to-date task reports success without running anything.
+4. **Review before pushing**, not in parallel with CI.
+
+v0.3 spent four runs on one test. The second and third found real product bugs,
+so the runs were not wasted — but they were only needed because the first fix
+was pushed as a hypothesis instead of a conclusion.
+
+---
+
+## 19. Definition of Done impact
 
 A v0.1 feature is not done merely because it works in one sandbox.
 
