@@ -438,7 +438,33 @@ paginate.
 
 ---
 
-## 37. Maintenance rule
+## 37. Candidates are not narrowed by the receiver (v0.4)
+
+The implementations offered for a call are the implementations of the callable's
+declared type. Flow Lens does not narrow them by what the receiver provably is
+at that call site.
+
+So in
+
+```java
+private final Gateway gateway = new StripeGateway();
+...
+gateway.charge();
+```
+
+the call is reported ambiguous and both implementations are offered, even though
+reading the class shows the receiver can only ever be `StripeGateway`. A
+data-flow analysis could prove that; the dispatch classification is deliberately
+syntactic (§23), erring toward reporting uncertainty rather than claiming
+certainty.
+
+The cost is this direction of the error: a candidate may be offered that this
+particular call site cannot reach. §35 records the other direction — a candidate
+that is offered is not evidence that it runs.
+
+---
+
+## 38. Maintenance rule
 
 Whenever dogfooding, fixture testing, Plugin Verifier, or a user report reveals a surprising but currently accepted behavior:
 

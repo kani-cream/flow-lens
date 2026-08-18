@@ -15,14 +15,29 @@ package demo;
 public class OrderController {
 
     private final PaymentService service = new PaymentService();
-    private final Gateway gateway = new StripeGateway();
+
+    /**
+     * Injected, not constructed here. Which implementation arrives is genuinely
+     * unknown from this file, which is what makes the ambiguity at the call site
+     * real rather than an artefact of Flow Lens not tracking the receiver.
+     *
+     * With `= new StripeGateway()` the answer was knowable by reading this class,
+     * and offering PaypalGateway as a choice was misleading — see
+     * `KNOWN_LIMITATIONS.md` §37.
+     */
+    private final Gateway gateway;
+
+    OrderController(Gateway gateway) {
+        this.gateway = gateway;
+    }
 
     void purchase(String rawOrder) {
         save(convert(load()));            // B: nested -> load, convert, save
         validate(1);                      // D: duplicate target,
         validate(2);                      //    two separate call cards
         service.work();                   // G: DECLARED TARGET (PremiumPaymentService overrides it)
-        gateway.charge();                 // H: AMBIGUOUS (interface, impl exists)
+        gateway.charge();                 // H: AMBIGUOUS — the receiver is injected,
+                                          //    so either implementation can arrive
         new Receipt();                    // constructor card
         rawOrder.trim();                  // J: EXTERNAL + PROJECT BOUNDARY
         KtService.handle();               // E: Java -> Kotlin -> Java
