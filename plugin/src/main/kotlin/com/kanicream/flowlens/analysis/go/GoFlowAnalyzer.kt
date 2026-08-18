@@ -417,11 +417,11 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
         }
 
         private fun calleeNameOf(call: GoCallExpr): String = when (val callee = call.expression) {
-            is GoReferenceExpression -> callee.identifier?.text ?: callee.text
+            is GoReferenceExpression -> callee.identifier.text
             // An immediately invoked literal has no name, and its whole source
             // text is not one: `func()` says what was called.
             is GoFunctionLit -> "func()"
-            else -> callee?.text ?: "?"
+            else -> callee.text
         }
 
         /**
