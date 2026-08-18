@@ -23,9 +23,20 @@ class FlowLensPanel(project: Project) : JPanel(BorderLayout()), Disposable {
 
     init {
         Disposer.register(this, controller)
+        // The status needs the full width to be readable, so it gets its own row
+        // under the toolbar rather than competing with it for space
+        // (`VISUAL_DESIGN.md` §3).
         val header = JPanel(BorderLayout()).apply {
-            add(FlowToolbar(project, controller).createComponent(this@FlowLensPanel), BorderLayout.WEST)
-            add(controller.statusView, BorderLayout.CENTER)
+            add(
+                JPanel(BorderLayout()).apply {
+                    add(
+                        FlowToolbar(project, controller).createComponent(this@FlowLensPanel),
+                        BorderLayout.WEST,
+                    )
+                },
+                BorderLayout.NORTH,
+            )
+            add(controller.statusView, BorderLayout.SOUTH)
         }
         add(header, BorderLayout.NORTH)
         add(

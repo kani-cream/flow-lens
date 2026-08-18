@@ -14,6 +14,8 @@ enum class StatusTone { IDLE, RUNNING, DONE, WARNING, ERROR }
  * state only — no Swing, no analysis access — so the mapping is unit-testable.
  */
 data class FlowStatusViewState(
+    /** The analyzed root, so the flow's subject stays visible when scrolled. */
+    val rootTitle: String?,
     val headline: String,
     val counters: String?,
     val tone: StatusTone,
@@ -34,6 +36,7 @@ object FlowStatusModel {
     fun stateOf(progress: FlowProgress?, result: FlowAnalysisResult?): FlowStatusViewState {
         if (progress == null && result == null) {
             return FlowStatusViewState(
+                rootTitle = null,
                 headline = FlowLensBundle.message("status.idle"),
                 counters = null,
                 tone = StatusTone.IDLE,
@@ -55,6 +58,7 @@ object FlowStatusModel {
         // has been observed yet, that one decides.
         val running = !(progress?.isTerminal ?: false) && !(result?.isTerminal ?: false)
         return FlowStatusViewState(
+            rootTitle = result?.rootFrame?.symbol?.displayName,
             headline = FlowLensBundle.message("status.stage.${stage.name}"),
             counters = progress?.let {
                 FlowLensBundle.message(

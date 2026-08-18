@@ -16,6 +16,7 @@ class FlowStatusViewTest : BasePlatformTestCase() {
         reanalyze: Boolean = true,
         diagnostics: List<String> = listOf("One method body could not be analyzed"),
     ) = FlowStatusViewState(
+        rootTitle = "purchase()",
         headline = "Completed (truncated at node limit)",
         counters = counters,
         tone = StatusTone.WARNING,
@@ -45,17 +46,43 @@ class FlowStatusViewTest : BasePlatformTestCase() {
         }
     }
 
-    fun `test a narrow strip has a minimum width small enough for a narrow tool window`() {
+    fun `test a narrow strip shortens its text instead of dropping it`() {
         val view = FlowStatusView(onReanalyze = {})
         view.apply(state())
-        assertEquals(0, view.minimumSize.width)
-        assertEquals(view.preferredSize.height, view.minimumSize.height)
+        val singleRow = view.preferredSize.height
+        val summary = view.components.filterIsInstance<javax.swing.JLabel>()
+            .first { it.text.contains("nodes") }
+
+        // Regression: the status used to be several labels competing for a shared
+        // row, and a narrow tool window left some of them zero width — they simply
+        // disappeared instead of shortening.
+        for (width in listOf(600, 320, 200, 120)) {
+            view.size = Dimension(width, singleRow)
+            view.doLayout()
+            assertTrue(
+                "the summary keeps a readable width at ${width}px, was ${summary.width}",
+                summary.width >= 20,
+            )
+            assertTrue(
+                "the trailing markers never take more than half the strip",
+                view.components.last().width <= width / 2,
+            )
+        }
+    }
+
+    fun `test the strip carries the analyzed root so the subject stays visible`() {
+        val view = FlowStatusView(onReanalyze = {})
+        view.apply(state())
+        val summary = view.components.filterIsInstance<javax.swing.JLabel>()
+            .first { it.text.contains("nodes") }
+        assertTrue("the root is named first", summary.text.startsWith("purchase()"))
     }
 
     fun `test what cannot be shown is still readable on hover`() {
         val view = FlowStatusView(onReanalyze = {})
         view.apply(state())
         val tooltip = view.toolTipText
+        assertTrue(tooltip.contains("purchase()"))
         assertTrue(tooltip.contains("215 nodes"))
         assertTrue(tooltip.contains("Completed"))
         assertTrue(tooltip.contains("could not be analyzed"))

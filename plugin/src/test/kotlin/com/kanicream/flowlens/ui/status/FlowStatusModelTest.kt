@@ -46,6 +46,7 @@ class FlowStatusModelTest : BasePlatformTestCase() {
 
     fun `test idle state before any analysis`() {
         val state = FlowStatusModel.stateOf(null, null)
+        assertNull(state.rootTitle)
         assertEquals(StatusTone.IDLE, state.tone)
         assertNull(state.counters)
         assertFalse(state.stopEnabled)
