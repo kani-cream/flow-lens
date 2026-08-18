@@ -127,6 +127,12 @@ Lambdas, anonymous functions, Go function literals, and similar nested callable 
 
 Future callback/lambda semantics should model the invocation boundary explicitly rather than treating nested source text as if it executes immediately.
 
+**Superseded in v0.5** for a body handed to a call: it is now a callback event
+with a frame of its own, and never flattened into the enclosing flow. The half
+that still stands is the second sentence — the invocation boundary is modelled
+explicitly, which is why §40 exists. A body that is *not* handed to a call is
+still not followed (§42), and a lambda is still not an entry point of its own.
+
 ---
 
 ## 12. Analysis is intentionally bounded
@@ -477,7 +483,74 @@ offering something that quietly does nothing when chosen.
 
 ---
 
-## 39. Maintenance rule
+## 39. Callback timing comes from a short list, not from understanding (v0.5)
+
+A callback's execution mode is justified by one of three things: Kotlin's
+`inline` rule, Go's `go`/`defer` keywords, or a hand-written list of documented
+APIs (`V0.5_SPEC.md` §4.3). Nothing else is recognized.
+
+A project's own asynchronous helper — `runLater(() -> …)`, an in-house executor
+wrapper — is therefore `UNKNOWN` until its API is added to that list. That is
+honest rather than helpful, and it is the deliberate trade: a name-based guess
+("anything called `*Async`") would be right often enough to be trusted and wrong
+often enough to mislead.
+
+---
+
+## 40. `UNKNOWN` timing is common in Java (v0.5)
+
+Java has no language-level signal that a lambda runs before the call returns.
+Outside the documented list, the honest answer is that the timing is not
+determined, and the card, the details panel, and both exports say so in words.
+
+A reader who sees `UNKNOWN` is being told the analyzer does not know — not that
+the body runs at that point in the flow.
+
+---
+
+## 41. Concurrency is shown, safety is not (v0.5)
+
+Flow Lens shows that two bodies may run concurrently. It says nothing about
+whether that is safe: no data races, no happens-before relationships, no thread
+confinement, no lock analysis.
+
+Two callbacks drawn one above the other are not ordered with respect to each
+other, and neither is ordered with respect to the code after the call.
+
+---
+
+## 42. A body that is stored and invoked elsewhere is not followed (v0.5)
+
+A lambda assigned to a variable, a field, or returned from a method produces no
+callback event. Its invocation site is somewhere else, and finding it is reverse
+analysis — which Flow Lens does not do, and which is a v1.x candidate
+(`PLAN.md` §17).
+
+Nothing is invented in its place: the map simply does not claim to know when
+that body runs.
+
+---
+
+## 43. Go channel topology is still not modelled (v0.5)
+
+A goroutine's body is now visible, and `select` renders as a structure. Which
+goroutine receives what a channel carries is still not modelled, so a `select`
+case is not connected to the `go` block that feeds it.
+
+§9 stands otherwise: there is no scheduler model and no defer-stack ordering.
+
+---
+
+## 44. Two asynchronous callbacks have no order (v0.5)
+
+When a call hands out two bodies whose ordering is `UNSPECIFIED`, the canvas
+draws them in source order because it has to draw them somewhere. Position is
+not a claim about sequence — the same rule as `VISUAL_DESIGN.md` §19 — and their
+dashed connectors are what says so.
+
+---
+
+## 45. Maintenance rule
 
 Whenever dogfooding, fixture testing, Plugin Verifier, or a user report reveals a surprising but currently accepted behavior:
 

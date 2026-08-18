@@ -20,6 +20,19 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>0.5.0 — Asynchronous semantics.</b></p>
+        <ul>
+            <li>A body handed to a call — a lambda, a Kotlin trailing lambda, a Go
+            closure — is no longer invisible. It appears as its own step, with its
+            own frame you can open, named after the call it was given to.</li>
+            <li>Each one says <em>when</em> it runs, in words: in place, concurrently,
+            as a goroutine, deferred — or that the timing could not be determined.
+            Flow Lens states an unknown timing rather than letting position imply
+            an answer, and the status area counts the ones it could not justify.</li>
+            <li>Go parity: <code>go func() { … }()</code> and
+            <code>defer func() { … }()</code> bodies are now visible.</li>
+        </ul>
+
         <p><b>0.4.0 — Ambiguity and sharing.</b></p>
         <ul>
             <li>An interface or abstract call is no longer a dead end: Flow Lens
