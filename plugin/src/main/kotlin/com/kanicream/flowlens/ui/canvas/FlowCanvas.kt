@@ -547,8 +547,12 @@ class FlowCanvas : JComponent() {
         }
         card.trailingNote?.let { note ->
             g2.color = Palette.mutedText
-            val noteWidth = g2.fontMetrics.stringWidth(note)
-            g2.drawString(note, rightEdge - noteWidth - 6, baseline)
+            // The callable's name is the card's identity and gets the width
+            // first; a note is a qualifier and is shortened before the name is.
+            val noteLimit = (b.width * NOTE_WIDTH_SHARE).toInt()
+            val shown = truncate(g2, note, noteLimit)
+            val noteWidth = g2.fontMetrics.stringWidth(shown)
+            g2.drawString(shown, rightEdge - noteWidth - 6, baseline)
             rightEdge -= noteWidth + 6
         }
         val trailingWidth = b.x + b.width - rightEdge
@@ -835,6 +839,9 @@ class FlowCanvas : JComponent() {
     companion object {
         /** Marks a callable the developer is tracking (`V0.3_SPEC.md` §4). */
         const val PIN_GLYPH = "★"
+
+        /** Most of a card belongs to its name, not to what qualifies it. */
+        private const val NOTE_WIDTH_SHARE = 0.38
 
         private const val SELECTION_RING_GAP = 3
         private val SOLID_STROKE = BasicStroke(1.4f)

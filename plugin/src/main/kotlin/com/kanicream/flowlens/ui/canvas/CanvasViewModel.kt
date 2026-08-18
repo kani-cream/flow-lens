@@ -334,7 +334,13 @@ object CanvasViewModelBuilder {
                 // A chosen continuation outranks the test badge here: it changes
                 // what the body below the card is, which the reader must not miss.
                 node.metadata[FlowMetadata.CHOSEN] != null ->
-                    FlowLensBundle.message("card.badge.chosen", node.metadata[FlowMetadata.CHOSEN]!!)
+                    // The container is the distinguishing half — the method name
+                    // is already on the card — and a badge long enough to starve
+                    // the title would hide the identity it qualifies.
+                    FlowLensBundle.message(
+                        "card.badge.chosen",
+                        node.metadata[FlowMetadata.CHOSEN]!!.substringBeforeLast("."),
+                    )
                 node.metadata[FlowMetadata.TEST_SOURCE] == "true" ->
                     FlowLensBundle.message("card.badge.test.source")
                 else -> null

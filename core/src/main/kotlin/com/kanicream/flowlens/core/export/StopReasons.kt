@@ -20,16 +20,20 @@ internal object StopReasons {
         return buildList {
             count(nodes) {
                 it.metadata[MarkdownExporter.LIMIT_KEY] == MarkdownExporter.LIMIT_DEPTH
-            }?.let { add("$it — ${s.depthLimited}") }
+            }?.let { add(format(s.reasonDepthLimited, it)) }
             count(nodes) { it.resolutionStatus == ResolutionStatus.UNRESOLVED }
-                ?.let { add("$it — ${s.unresolved}") }
+                ?.let { add(format(s.reasonUnresolved, it)) }
             count(nodes) { it.resolutionStatus == ResolutionStatus.EXTERNAL }
-                ?.let { add("$it — ${s.external}") }
-            count(nodes) { it.kind == FlowNodeKind.CYCLE }?.let { add("$it — ${s.cycle}") }
+                ?.let { add(format(s.reasonExternal, it)) }
+            count(nodes) { it.kind == FlowNodeKind.CYCLE }
+                ?.let { add(format(s.reasonCycle, it)) }
             count(nodes) { it.kind == FlowNodeKind.LIMIT }?.let { add(s.truncated) }
             if (request.result.controlFlowIncomplete) add(s.controlFlowSimplified)
         }
     }
+
+    /** The one placeholder these patterns use; no locale-dependent formatting. */
+    private fun format(pattern: String, count: Int): String = pattern.replace("{0}", count.toString())
 
     private fun count(nodes: List<FlowNode>, matches: (FlowNode) -> Boolean): Int? =
         nodes.count(matches).takeIf { it > 0 }

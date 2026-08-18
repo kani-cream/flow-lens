@@ -73,6 +73,10 @@ object FlowExport {
             chosenByReader = FlowLensBundle.message("export.chosen.by.reader"),
             // The same words the canvas uses, so an export reads in the reader's
             // language rather than in enum names.
+            reasonDepthLimited = FlowLensBundle.message("status.reason.depth.limited", "{0}"),
+            reasonUnresolved = FlowLensBundle.message("status.reason.unresolved", "{0}"),
+            reasonExternal = FlowLensBundle.message("status.reason.external", "{0}"),
+            reasonCycle = FlowLensBundle.message("status.reason.cycle", "{0}"),
             kinds = FlowNodeKind.entries.associate {
                 it.name to FlowLensBundle.message("enum.kind.${it.name}")
             },

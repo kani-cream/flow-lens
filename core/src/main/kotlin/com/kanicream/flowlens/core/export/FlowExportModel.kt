@@ -41,6 +41,15 @@ data class ExportStrings(
     val dispatchChoices: String = "Dispatch choices",
     val controlFlowSimplified: String = "control flow simplified",
     val chosenByReader: String = "chosen by the reader",
+    /**
+     * Reason lines, as patterns with `{0}` for the count. The export says what
+     * the status area says — "Outside the project: 2" rather than "2 — External"
+     * — so the two cannot describe the same run differently.
+     */
+    val reasonDepthLimited: String = "Not entered — depth limit: {0}",
+    val reasonUnresolved: String = "Could not be resolved: {0}",
+    val reasonExternal: String = "Outside the project: {0}",
+    val reasonCycle: String = "Already on this path: {0}",
     /** Structure kinds, keyed by [com.kanicream.flowlens.core.model.FlowNodeKind] name. */
     val kinds: Map<String, String> = emptyMap(),
     /** Branch kinds, keyed by [com.kanicream.flowlens.core.model.BranchKind] name. */

@@ -259,6 +259,19 @@ class ExportTest {
     }
 
     @Test
+    fun `a reason reads the way the status area reads it`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        b.addEvent(root, call("trim", "String", ResolutionStatus.EXTERNAL))
+        b.addEvent(root, call("other", "String", ResolutionStatus.EXTERNAL))
+        val markdown = MarkdownExporter.export(
+            ExportRequest(b.snapshot(FlowResultStatus.COMPLETED), ExportContext()),
+        )
+        assertTrue(markdown.contains("Outside the project: 2"), markdown)
+        assertFalse(markdown.contains("- 2 —"), "a bare count reads as a list index")
+    }
+
+    @Test
     fun `T no path from the model leaks into either format`() {
         // The sample's nodes carry an absolute path, so this can actually fail.
         val request = request()

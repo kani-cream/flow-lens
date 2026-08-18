@@ -283,9 +283,11 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
             .build(result, emptySet())!!.cards.first()
 
         assertEquals("StripeGateway.charge()", card.chosenImplementation)
-        assertTrue(
-            "the card carries a visible mark, not just a field: ${card.trailingNote}",
-            card.trailingNote?.contains("StripeGateway") == true,
+        assertEquals(
+            "the badge names the container; the method name is already on the card, " +
+                "and a longer badge would squeeze out the name it qualifies",
+            "→ StripeGateway",
+            card.trailingNote,
         )
         assertTrue(
             "and the tooltip explains it: ${card.tooltip}",
