@@ -12,6 +12,8 @@ import com.kanicream.flowlens.core.model.FlowLimits
 import com.kanicream.flowlens.service.FlowAnalysisService
 import com.kanicream.flowlens.service.FlowMetadata
 import com.kanicream.flowlens.testutil.RealJdkProjectDescriptor
+import com.kanicream.flowlens.workflow.EntryResolution
+import com.kanicream.flowlens.workflow.FlowEntryResolver
 import com.kanicream.flowlens.workflow.FlowEntryRef
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -74,6 +76,7 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
 
     override fun tearDown() {
         try {
+            choices.onChanged = {}
             choices.clearAll()
             service.cancelActive()
         } finally {
@@ -102,7 +105,7 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     fun `test A an interface call lists its implementations in a stable order`() {
-        val result = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+        val result = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod(), FlowLimits()) }
         assertEquals(
             listOf("PaypalGateway", "StripeGateway"),
             result.candidates.map { it.symbol.containerName },
@@ -122,7 +125,7 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
                 """.trimIndent(),
             )
         }
-        val result = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+        val result = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod(), FlowLimits()) }
         assertTrue(
             "the interface method is not an implementation of itself",
             result.candidates.none { it.symbol.containerName == "Gateway" },
@@ -149,7 +152,7 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
                 """.trimIndent(),
             )
         }
-        val result = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+        val result = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod(), FlowLimits()) }
 
         assertEquals(
             "the declared type's implementations, not the receiver's",
@@ -184,7 +187,7 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
             val cls = myFixture.javaFacade.findClass("demo.Lonely")!!
             PsiTreeUtil.findChildrenOfType(cls, PsiMethod::class.java).first { it.name == "act" }
         }
-        val result = runReadActionBlocking { CandidateFinder.find(project, method) }
+        val result = runReadActionBlocking { CandidateFinder.find(project, method, FlowLimits()) }
         assertTrue("nothing implements it, so there is nothing to choose", result.isEmpty)
         assertFalse(result.partial)
     }
@@ -203,7 +206,7 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
                 )
             }
         }
-        val result = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+        val result = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod(), FlowLimits()) }
         assertEquals(CandidateFinder.MAX_CANDIDATES, result.candidates.size)
         assertTrue(
             "a truncated list that did not say so would read as complete",
@@ -212,7 +215,7 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     fun `test I a chosen continuation obeys the depth limit like any other`() {
-        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod(), FlowLimits()) }
             .candidates.first { it.symbol.containerName == "StripeGateway" }
         choices.choose(DispatchChoice(interfaceKey(), "Gateway.charge()", candidate.entry))
 
@@ -250,6 +253,86 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
         )
     }
 
+    fun `test a choice whose target is no longer an implementation is dropped`() {
+        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod(), FlowLimits()) }
+            .candidates.first { it.symbol.containerName == "StripeGateway" }
+        choices.choose(DispatchChoice(interfaceKey(), "Gateway.charge()", candidate.entry))
+        assertNotNull("the choice applies first", analyze().rootFrame!!.events.first().targetFrameId)
+
+        // The method keeps its name, file and signature; only the relationship
+        // that made it a candidate is gone.
+        ApplicationManager.getApplication().invokeAndWait {
+            myFixture.addFileToProject(
+                "demo2/StripeGateway.java",
+                "package demo2;\n",
+            )
+            val file = myFixture.javaFacade.findClass("demo.StripeGateway")!!.containingFile
+            com.intellij.openapi.command.WriteCommandAction.runWriteCommandAction(project) {
+                com.intellij.psi.PsiDocumentManager.getInstance(project)
+                    .getDocument(file)!!
+                    .setText(
+                        """
+                        package demo;
+                        public class StripeGateway {
+                            public void charge() { callApi(); }
+                            void callApi() { }
+                        }
+                        """.trimIndent(),
+                    )
+                com.intellij.psi.PsiDocumentManager.getInstance(project).commitAllDocuments()
+            }
+        }
+
+        val call = analyze().rootFrame!!.events.first()
+        assertNull(
+            "an unrelated method must not keep receiving the traversal",
+            call.targetFrameId,
+        )
+        assertNull(call.metadata[FlowMetadata.CHOSEN])
+        assertTrue(
+            "and the choice is dropped rather than retried every run",
+            choices.all().none { it.fromKey == interfaceKey() },
+        )
+    }
+
+    fun `test a candidate the run could not enter is not offered`() {
+        ApplicationManager.getApplication().invokeAndWait {
+            myFixture.addFileToProject(
+                "test/demo/MockGateway.java",
+                """
+                package demo;
+                public class MockGateway implements Gateway {
+                    public void charge() { }
+                }
+                """.trimIndent(),
+            )
+        }
+        // Whether a test-source implementation is offered has to match whether
+        // the run would enter it; otherwise choosing it changes nothing and says
+        // nothing about why.
+        val withoutTests = runReadActionBlocking {
+            CandidateFinder.find(project, interfaceMethod(), FlowLimits(includeTests = false))
+        }
+        val withTests = runReadActionBlocking {
+            CandidateFinder.find(project, interfaceMethod(), FlowLimits(includeTests = true))
+        }
+        assertEquals(
+            withTests.candidates.map { it.symbol.containerName }.toSet() -
+                withoutTests.candidates.map { it.symbol.containerName }.toSet(),
+            withTests.candidates.map { it.symbol.containerName }.toSet() -
+                withoutTests.candidates.map { it.symbol.containerName }.toSet(),
+        )
+        assertTrue(
+            "every offered candidate is one the run would enter",
+            withoutTests.candidates.all {
+                runReadActionBlocking {
+                    val decl = (FlowEntryResolver.resolve(project, it.entry) as EntryResolution.Found).declaration
+                    CandidateFinder.enterable(project, decl, FlowLimits(includeTests = false))
+                }
+            },
+        )
+    }
+
     fun `test the call is a dead end before any choice`() {
         val call = analyze().rootFrame!!.events.first()
         assertEquals(DispatchConfidence.AMBIGUOUS, call.dispatchConfidence)
@@ -258,7 +341,7 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     fun `test E and G choosing continues into the implementation, at every call site`() {
-        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod(), FlowLimits()) }
             .candidates.first { it.symbol.containerName == "StripeGateway" }
         val key = runReadActionBlocking {
             com.kanicream.flowlens.analysis.FlowAnalyzerRegistry
@@ -281,7 +364,7 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     fun `test F a chosen call still reports the confidence it actually has`() {
-        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod(), FlowLimits()) }
             .candidates.first { it.symbol.containerName == "StripeGateway" }
         val key = runReadActionBlocking {
             com.kanicream.flowlens.analysis.FlowAnalyzerRegistry
@@ -311,7 +394,7 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
     fun `test the card and the details panel both say the continuation was chosen`() {
         // The honesty rule is about what the reader sees. The model getting it
         // right while the canvas stays silent is the failure this guards.
-        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod(), FlowLimits()) }
             .candidates.first { it.symbol.containerName == "StripeGateway" }
         choices.choose(DispatchChoice(interfaceKey(), "Gateway.charge()", candidate.entry))
 
@@ -376,7 +459,7 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
             com.kanicream.flowlens.analysis.FlowAnalyzerRegistry
                 .forDeclaration(baseWork)!!.describeCallable(baseWork).key
         }
-        val derived = runReadActionBlocking { CandidateFinder.find(project, baseWork) }
+        val derived = runReadActionBlocking { CandidateFinder.find(project, baseWork, FlowLimits()) }
             .candidates.first { it.symbol.containerName == "Derived" }
         choices.choose(DispatchChoice(key, "Base.work()", derived.entry))
 
@@ -394,7 +477,7 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     fun `test H clearing a choice makes the call a dead end again`() {
-        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod(), FlowLimits()) }
             .candidates.first()
         val key = runReadActionBlocking {
             com.kanicream.flowlens.analysis.FlowAnalyzerRegistry
@@ -408,6 +491,38 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
         val call = analyze().rootFrame!!.events.first()
         assertNull(call.targetFrameId)
         assertNull(call.metadata[FlowMetadata.CHOSEN])
+    }
+
+    fun `test dropping a stale choice does not cancel the run that reported it`() {
+        // The warning rides on the result of the run that found the choice
+        // unusable. Clearing through the normal path would start another run, and
+        // that result — with its warning — would be rejected as stale.
+        val notifications = java.util.concurrent.atomic.AtomicInteger()
+        choices.onChanged = { notifications.incrementAndGet() }
+        choices.choose(
+            DispatchChoice(
+                interfaceKey(),
+                "Gateway.charge()",
+                FlowEntryRef("java:demo.Ghost#charge()", "java", "charge()", "Ghost", "demo/Ghost.java"),
+            ),
+        )
+        val afterChoosing = notifications.get()
+
+        val result = analyze()
+
+        assertEquals(
+            "dropping a stale choice must not ask for a re-run",
+            afterChoosing,
+            notifications.get(),
+        )
+        assertTrue(
+            "the reader is told, on the result that found it: ${result.diagnostics}",
+            result.diagnostics.any { it.messageKey == "flow.warning.choice.unresolved" },
+        )
+        assertTrue(
+            "and the choice is gone",
+            choices.all().none { it.fromKey == interfaceKey() },
+        )
     }
 
     fun `test J a choice pointing at something gone is not applied`() {

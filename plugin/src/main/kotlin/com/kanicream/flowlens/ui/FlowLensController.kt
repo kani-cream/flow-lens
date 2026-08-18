@@ -34,6 +34,7 @@ import com.kanicream.flowlens.workflow.FlowEntryRef
 import com.kanicream.flowlens.workflow.FlowLensFlows
 import com.kanicream.flowlens.workflow.LaunchOutcome
 import com.kanicream.flowlens.service.FlowAnalysisService
+import com.kanicream.flowlens.settings.FlowLensSettings
 import com.kanicream.flowlens.ui.canvas.CardVM
 import com.kanicream.flowlens.ui.canvas.FlowCanvas
 import com.kanicream.flowlens.ui.canvas.FlowCanvasActions
@@ -273,7 +274,9 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
         // even be interrupted. It runs in the background, cancellably, and the
         // dialog opens when it comes back.
         ReadAction.nonBlocking<CandidateSearchResult?> {
-            pointer.element?.takeIf { it.isValid }?.let { CandidateFinder.find(project, it) }
+            pointer.element?.takeIf { it.isValid }?.let {
+                CandidateFinder.find(project, it, limitsForNextRun())
+            }
         }
             .inSmartMode(project)
             .expireWith(this)
@@ -322,6 +325,10 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
      * A choice changes what the traversal may enter, so the map is produced
      * again rather than grafted onto (`V0.4_SPEC.md` §4.2).
      */
+    /** What a run started now would use, so an offer matches what will happen. */
+    private fun limitsForNextRun(): FlowLimits =
+        service.limitsOfCurrentRun() ?: FlowLensSettings.getInstance(project).snapshot()
+
     private fun reanalyzeForChoices() {
         if (service.results.value?.rootFrame == null) return
         service.reanalyze()

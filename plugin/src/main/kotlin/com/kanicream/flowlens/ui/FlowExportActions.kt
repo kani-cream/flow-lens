@@ -3,7 +3,6 @@ package com.kanicream.flowlens.ui
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
 import com.kanicream.flowlens.FlowLensBundle
-import com.kanicream.flowlens.core.export.ChoiceLine
 import com.kanicream.flowlens.core.export.ExportContext
 import com.kanicream.flowlens.core.export.ExportRequest
 import com.kanicream.flowlens.core.export.ExportStrings
@@ -13,7 +12,6 @@ import com.kanicream.flowlens.core.model.BranchKind
 import com.kanicream.flowlens.core.model.FlowNodeKind
 import com.kanicream.flowlens.core.model.FlowResultStatus
 import com.kanicream.flowlens.core.model.FlowAnalysisResult
-import com.kanicream.flowlens.dispatch.DispatchChoices
 import java.awt.datatransfer.StringSelection
 
 /** The formats a flow can leave the IDE in (`V0.4_SPEC.md` §5). */
@@ -40,18 +38,11 @@ object FlowExport {
     }
 
     /**
-     * The reader's language and the choices in effect, so an export reads like
-     * the tool window and repeats what was chosen (`V0.4_SPEC.md` §5.2).
+     * The reader's language. The choices an export lists come from the result
+     * itself, not from here: the session's list can hold choices that this flow
+     * never applied.
      */
     private fun contextOf(project: Project): ExportContext = ExportContext(
-        choices = DispatchChoices.getInstance(project).all().map { choice ->
-            // Container plus name on both sides: two implementations of one
-            // method are otherwise indistinguishable in the export.
-            ChoiceLine(
-                choice.fromDisplayName,
-                listOfNotNull(choice.to.containerName, choice.to.displayName).joinToString("."),
-            )
-        },
         strings = ExportStrings(
             ambiguous = FlowLensBundle.message("enum.dispatch.AMBIGUOUS"),
             declaredTarget = FlowLensBundle.message("enum.dispatch.DECLARED_TARGET"),

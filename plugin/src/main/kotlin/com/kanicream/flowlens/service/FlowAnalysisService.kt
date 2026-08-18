@@ -119,10 +119,7 @@ class FlowAnalysisService(
             handles = handles,
             publishResult = ::acceptResult,
             publishProgress = ::acceptProgress,
-            onStaleChoices = { keys ->
-                val store = DispatchChoices.getInstance(project)
-                keys.forEach(store::clear)
-            },
+            onStaleChoices = { keys -> DispatchChoices.getInstance(project).dropStale(keys) },
         )
         val job = scope.launch(Dispatchers.Default) { run.execute() }
         synchronized(lock) {

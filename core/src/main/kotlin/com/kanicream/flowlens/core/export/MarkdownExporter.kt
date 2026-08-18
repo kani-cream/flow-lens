@@ -119,7 +119,7 @@ object MarkdownExporter {
     }
 
     private fun appendChoices(out: StringBuilder, request: ExportRequest) {
-        val choices = request.context.choices
+        val choices = AppliedChoices.of(request.result)
         if (choices.isEmpty()) return
         out.append("\n## ").append(request.context.strings.dispatchChoices).append("\n\n")
         for (choice in choices) {

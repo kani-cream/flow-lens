@@ -71,6 +71,7 @@ class FlowLensBundleParityTest {
             "flow.error.frame.failed",
             "flow.error.frame.invalidated",
             "flow.error.run.failed",
+            "flow.warning.choice.unresolved",
         )
         val missing = keys.filterNot { en.containsKey(it) }
         assertTrue("missing diagnostic keys: $missing", missing.isEmpty())

@@ -5,6 +5,11 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.search.searches.DefinitionsScopedSearch
 import com.intellij.util.Processor
 import com.kanicream.flowlens.analysis.FlowAnalyzerRegistry
+import com.kanicream.flowlens.analysis.TargetClassifier
+import com.kanicream.flowlens.core.engine.TargetFacts
+import com.kanicream.flowlens.core.engine.TraversalPolicy
+import com.kanicream.flowlens.core.model.DispatchConfidence
+import com.kanicream.flowlens.core.model.FlowLimits
 import com.kanicream.flowlens.core.model.FlowSymbol
 import com.kanicream.flowlens.workflow.FlowEntryRef
 
@@ -41,7 +46,17 @@ object CandidateFinder {
     /** `V0.4_SPEC.md` §3.4. */
     const val MAX_CANDIDATES = 20
 
-    fun find(project: Project, declaration: PsiElement): CandidateSearchResult {
+    /**
+     * [limits] is the configuration the next run will use. Without it the list
+     * offers implementations the traversal then refuses — a test double under
+     * the default `includeTests = false`, a generated source — and choosing one
+     * changes nothing, with no way to tell why.
+     */
+    fun find(
+        project: Project,
+        declaration: PsiElement,
+        limits: FlowLimits,
+    ): CandidateSearchResult {
         val found = LinkedHashMap<String, DispatchCandidate>()
         var partial = false
 
@@ -66,6 +81,7 @@ object CandidateFinder {
                 if (!FlowEntryRef.isStorable(symbol) || symbol.key == describeSelf(declaration)) {
                     return@Processor true
                 }
+                if (!enterable(project, candidate, limits)) return@Processor true
                 found[symbol.key] = DispatchCandidate(symbol, FlowEntryRef.of(symbol, project, file))
                 // Searching one past the cap lets the caller say the list is
                 // partial rather than guess.
@@ -82,6 +98,25 @@ object CandidateFinder {
             .sortedWith(compareBy({ it.symbol.containerName ?: "" }, { it.symbol.displayName }))
             .take(MAX_CANDIDATES)
         return CandidateSearchResult(candidates, partial)
+    }
+
+    /**
+     * Whether the run's own policy would enter this declaration. Asking the same
+     * question the traversal asks is what keeps the offer honest
+     * (`V0.4_SPEC.md` §3.3).
+     */
+    fun enterable(project: Project, declaration: PsiElement, limits: FlowLimits): Boolean {
+        val target = TargetClassifier.classify(project, declaration, DispatchConfidence.EXACT)
+        return TraversalPolicy.mayEnterBody(
+            TargetFacts(
+                hasAnalyzableBody = target.hasAnalyzableBody,
+                origin = target.sourceOrigin,
+                resolution = target.resolutionStatus,
+                dispatch = DispatchConfidence.EXACT,
+                inTestSource = target.inTestSource,
+            ),
+            limits,
+        )
     }
 
     /** The declaration's own key, so it is not offered as an implementation of itself. */

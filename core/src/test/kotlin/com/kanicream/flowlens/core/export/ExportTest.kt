@@ -71,10 +71,8 @@ class ExportTest {
         return b.snapshot(FlowResultStatus.COMPLETED)
     }
 
-    private fun request(result: FlowAnalysisResult = sample()) = ExportRequest(
-        result,
-        ExportContext(choices = listOf(ChoiceLine("Gateway.pay()", "StripeGateway.pay()"))),
-    )
+    private fun request(result: FlowAnalysisResult = sample()) =
+        ExportRequest(result, ExportContext())
 
     @Test
     fun `L exporting twice produces identical text`() {
@@ -163,6 +161,50 @@ class ExportTest {
     }
 
     @Test
+    fun `branches reconverge on what follows the structure`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        val condition = b.openStructure(root, StructureSpec(FlowNodeKind.CONDITION, null, "flag"))!!
+        b.openBranch(condition, BranchKind.THEN, null)
+        b.addEvent(root, call("charge"))
+        b.openBranch(condition, BranchKind.ELSE, null)
+        b.addEvent(root, call("skip"))
+        b.closeStructure(condition)
+        b.addEvent(root, call("save"))
+
+        val mermaid = MermaidExporter.export(
+            ExportRequest(b.snapshot(FlowResultStatus.COMPLETED), ExportContext()),
+        )
+        val save = Regex("""^  (n\d+)\["save""", RegexOption.MULTILINE).find(mermaid)!!.groupValues[1]
+        val charge = Regex("""^  (n\d+)\["charge""", RegexOption.MULTILINE).find(mermaid)!!.groupValues[1]
+        val skip = Regex("""^  (n\d+)\["skip""", RegexOption.MULTILINE).find(mermaid)!!.groupValues[1]
+        val condId = Regex("""^  (n\d+)\["condition""", RegexOption.MULTILINE)
+            .find(mermaid)!!.groupValues[1]
+
+        // Both branch ends lead to what follows; the structure itself does not,
+        // or the step after an if reads as a third alternative beside then/else.
+        assertTrue(mermaid.contains("$charge --> $save"), mermaid)
+        assertTrue(mermaid.contains("$skip --> $save"), mermaid)
+        assertFalse(mermaid.contains("$condId --> $save"), mermaid)
+    }
+
+    @Test
+    fun `an export lists only the choices the result applied`() {
+        // The sample's chosen call carries the marker; a session choice that this
+        // flow never applied has no way to reach the document.
+        val markdown = MarkdownExporter.export(request())
+        assertTrue(markdown.contains("`Gateway.pay()` → `StripeGateway.pay()`"), markdown)
+
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        b.addEvent(root, call("plain"))
+        val unrelated = MarkdownExporter.export(
+            ExportRequest(b.snapshot(FlowResultStatus.COMPLETED), ExportContext()),
+        )
+        assertFalse(unrelated.contains("Dispatch choices"), unrelated)
+    }
+
+    @Test
     fun `P a structure becomes a subgraph`() {
         val mermaid = MermaidExporter.export(request())
         assertTrue(mermaid.contains("subgraph s0"), mermaid)
@@ -173,7 +215,7 @@ class ExportTest {
     @Test
     fun `node ids are positional so the diagram diffs cleanly`() {
         val mermaid = MermaidExporter.export(request())
-        assertTrue(mermaid.startsWith("flowchart TD\n  n0["), mermaid)
+        assertTrue(mermaid.startsWith("```mermaid\nflowchart TD\n  n0["), mermaid)
         val ids = Regex("^  (n\\d+)\\[", RegexOption.MULTILINE).findAll(mermaid)
             .map { it.groupValues[1] }.toList()
         assertEquals(ids.sortedBy { it.drop(1).toInt() }, ids, "ids are dense and ordered")

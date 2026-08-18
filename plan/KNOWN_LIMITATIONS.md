@@ -464,7 +464,20 @@ that is offered is not evidence that it runs.
 
 ---
 
-## 38. Maintenance rule
+## 38. A candidate list reflects the current settings (v0.4 hardening)
+
+The implementations offered for an ambiguous call are the ones the run's own
+policy would enter, under the limits in effect when the list is built. A test
+double is therefore offered only when `Include tests` is on, and a generated
+source is never offered.
+
+The consequence is that the same call can offer different lists at different
+times, because the settings decide what is enterable. That is preferable to
+offering something that quietly does nothing when chosen.
+
+---
+
+## 39. Maintenance rule
 
 Whenever dogfooding, fixture testing, Plugin Verifier, or a user report reveals a surprising but currently accepted behavior:
 

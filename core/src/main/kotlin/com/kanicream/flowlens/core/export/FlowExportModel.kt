@@ -10,12 +10,14 @@ import com.kanicream.flowlens.core.model.FlowAnalysisResult
  * no PSI, no Swing — which is what makes byte-for-byte determinism testable
  * (`V0.4_SPEC.md` §5.1).
  */
-data class ExportContext(
-    /** Dispatch choices in effect: callable display name to chosen display name. */
-    val choices: List<ChoiceLine> = emptyList(),
-    val strings: ExportStrings = ExportStrings(),
-)
+data class ExportContext(val strings: ExportStrings = ExportStrings())
 
+/**
+ * A choice the exported result actually applied, derived from the result rather
+ * than from what the session happens to hold. A choice made while reading one
+ * flow says nothing about another, and listing it there would put something in
+ * the export that is not on the map (`V0.4_SPEC.md` §2).
+ */
 data class ChoiceLine(val from: String, val to: String)
 
 /**
