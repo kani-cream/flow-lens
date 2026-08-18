@@ -2,7 +2,6 @@ package com.kanicream.flowlens.analysis.java
 
 import com.intellij.lang.java.JavaLanguage
 import com.intellij.psi.JavaTokenType
-import com.intellij.psi.PsiAnonymousClass
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiConditionalExpression
@@ -244,10 +243,7 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
                     operands.firstOrNull()?.let(::walk)
                     conditional { operands.drop(1).forEach(::walk) }
                 }
-                else -> {
-                    if (element is PsiAnonymousClass) return
-                    element.children.forEach(::walk)
-                }
+                else -> element.children.forEach(::walk)
             }
         }
 

@@ -41,6 +41,9 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
         onOpenCallSite = { navigateTo(selectionModel.selected?.node?.callSiteLocation) },
     )
 
+    /** Notified when view-only state such as zoom changes, so chrome can refresh. */
+    var onViewStateChanged: () -> Unit = {}
+
     private var currentRunId: RunId? = null
     private var running = false
 
@@ -55,6 +58,7 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
         // Selecting the entry clears the call details: the entry is a frame, not
         // a call event, so there is no call-site or dispatch state to describe.
         canvas.onEntrySelected = { selectionModel.select(null) }
+        canvas.onZoomChanged = { onViewStateChanged() }
         selectionModel.addListener { card: CardVM? -> detailsPanel.show(card?.node) }
         subscribe()
     }

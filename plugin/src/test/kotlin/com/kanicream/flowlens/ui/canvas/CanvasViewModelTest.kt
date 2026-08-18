@@ -394,6 +394,37 @@ class CanvasViewModelTest : BasePlatformTestCase() {
         assertTrue("a call that may not execute must not imply a proven path", cards[1].dashedIncomingConnector)
     }
 
+    fun `test the first call in a body still shows when it may not run`() {
+        // Regression: only connectors between siblings were drawn, so the first
+        // card of a frame looked identical whether or not it was conditional.
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), null)
+        b.addEvent(
+            root,
+            spec("audit").copy(
+                metadata = mapOf(com.kanicream.flowlens.service.FlowMetadata.CONDITIONAL to "true"),
+            ),
+        )
+        b.addEvent(root, spec("log"))
+        val cards = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!.cards
+        assertTrue(
+            "the first card carries the same non-certain treatment as any other",
+            cards[0].dashedIncomingConnector,
+        )
+        assertFalse(cards[1].dashedIncomingConnector)
+    }
+
+    fun `test a collapsed card does not share its bounds object`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), null)
+        b.addEvent(root, spec("leaf"))
+        val card = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!.cards.single()
+        assertEquals(card.bounds, card.containerBounds)
+        assertFalse("aliasing one rectangle into both fields is a trap", card.bounds === card.containerBounds)
+    }
+
     fun `test a queued child frame renders as resolving and is not yet expandable`() {
         val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
         val root = b.openRootFrame(symbol("root"), null)

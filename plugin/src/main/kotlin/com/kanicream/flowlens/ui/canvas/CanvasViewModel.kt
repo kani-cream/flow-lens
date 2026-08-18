@@ -389,7 +389,7 @@ object CanvasViewModelBuilder {
 
             val body = card.childFrame
             if (body == null) {
-                card.containerBounds = card.bounds
+                card.containerBounds = Rectangle(card.bounds)
             } else {
                 // The body is inset by CHILD_INDENT on both sides, which is why
                 // the container was measured that much wider than its content.

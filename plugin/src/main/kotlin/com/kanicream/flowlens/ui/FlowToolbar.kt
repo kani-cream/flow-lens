@@ -55,11 +55,22 @@ class FlowToolbar(
         SettingsAction(),
     )
 
+    private var toolbar: ActionToolbar? = null
+
     fun createComponent(targetComponent: JComponent): JComponent {
-        val toolbar: ActionToolbar =
-            ActionManager.getInstance().createActionToolbar(PLACE, group, true)
-        toolbar.targetComponent = targetComponent
-        return toolbar.component
+        val created = ActionManager.getInstance().createActionToolbar(PLACE, group, true)
+        created.targetComponent = targetComponent
+        toolbar = created
+        return created.component
+    }
+
+    /**
+     * Re-runs the action updates so the zoom percentage reflects a change made
+     * from the canvas — the wheel or a keyboard shortcut — instead of waiting for
+     * the toolbar's own update cycle.
+     */
+    fun refresh() {
+        toolbar?.updateActionsAsync()
     }
 
     private inner class AnalyzeAction : AnAction(

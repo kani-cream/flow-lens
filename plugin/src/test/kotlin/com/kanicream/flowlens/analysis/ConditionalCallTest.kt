@@ -229,6 +229,31 @@ class ConditionalCallTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(false, flow["b"])
     }
 
+    fun `test kotlin elvis and safe calls are conditional`() {
+        // The known limitations promise that a short-circuit right operand is
+        // marked; elvis short-circuits exactly like && and ||, and a safe call
+        // runs only when the receiver is not null.
+        val file = myFixture.configureByText(
+            "nullable.kt",
+            """
+            fun run(cached: String?, box: Box?) {
+                val value = cached ?: expensiveLoad()
+                box?.touch()
+                done()
+            }
+            class Box { fun touch() {} }
+            fun expensiveLoad(): String = ""
+            fun done() {}
+            """.trimIndent(),
+        )
+        val fn = PsiTreeUtil.findChildrenOfType(file, KtNamedFunction::class.java).first { it.name == "run" }
+        val flow = KotlinFlowAnalyzer().extractDirectFlow(fn).calls
+            .associate { it.calleeShortName to it.conditional }
+        assertEquals(true, flow["expensiveLoad"])
+        assertEquals(true, flow["touch"])
+        assertEquals(false, flow["done"])
+    }
+
     fun `test straight line calls are never marked conditional`() {
         val flow = javaFlow("a(); b(); c();")
         assertEquals(listOf(false, false, false), listOf(flow["a"], flow["b"], flow["c"]))

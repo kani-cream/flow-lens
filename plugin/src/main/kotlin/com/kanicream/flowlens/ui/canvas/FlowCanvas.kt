@@ -265,18 +265,42 @@ class FlowCanvas : JComponent() {
             headerY + 13,
         )
 
-        paintCards(g2, frame)
+        paintCards(g2, frame, bodyTop = b.y + CanvasMetrics.FRAME_HEADER)
     }
 
-    /** Paints one frame's cards in order, with the sequence connectors between them. */
-    private fun paintCards(g2: Graphics2D, frame: FrameVM) {
+    /**
+     * Paints one frame's cards in order with the sequence connectors between
+     * them. The first card has no predecessor, so when it is one that may not run
+     * it gets a lead-in connector of its own: otherwise a conditional first call
+     * would look exactly like one that always runs.
+     */
+    private fun paintCards(g2: Graphics2D, frame: FrameVM, bodyTop: Int) {
         var previous: CardVM? = null
         for (card in frame.cards) {
-            previous?.let { paintConnector(g2, it, card) }
+            if (previous == null) {
+                if (card.dashedIncomingConnector) paintLeadIn(g2, card, bodyTop)
+            } else {
+                paintConnector(g2, previous, card)
+            }
             paintCardTree(g2, card)
             if (card.depthLimited) paintDepthLimitStub(g2, card)
             previous = card
         }
+    }
+
+    /** A short non-certain connector from the body's start into its first call. */
+    private fun paintLeadIn(g2: Graphics2D, card: CardVM, bodyTop: Int) {
+        val x = card.bounds.x + card.bounds.width / 2
+        val yEnd = card.bounds.y
+        if (yEnd - bodyTop < 6) return
+        g2.color = Palette.connector
+        g2.stroke = DASHED_STROKE
+        g2.drawLine(x, bodyTop, x, yEnd - 2)
+        g2.fillPolygon(
+            intArrayOf(x - 4, x + 4, x),
+            intArrayOf(yEnd - 6, yEnd - 6, yEnd - 1),
+            3,
+        )
     }
 
     /** Explicit continuation marker: more code exists but was not analyzed. */
@@ -343,7 +367,7 @@ class FlowCanvas : JComponent() {
             header.x + header.width - 12,
             header.y + header.height + CanvasMetrics.NESTED_TOP_GAP / 2,
         )
-        paintCards(g2, body)
+        paintCards(g2, body, bodyTop = header.y + header.height + CanvasMetrics.NESTED_TOP_GAP / 2)
     }
 
     /** Draws the box for a call: just the card, or the whole container when expanded. */
@@ -555,7 +579,9 @@ class FlowCanvas : JComponent() {
                         true
                     }
                     e.keyCode == KeyEvent.VK_ESCAPE -> {
-                        val hadSelection = selectedNodeId != null
+                        // The entry keeps its selection in its own flag, so both
+                        // have to count as something Escape cleared.
+                        val hadSelection = selectedNodeId != null || entrySelected
                         select(null)
                         hadSelection
                     }

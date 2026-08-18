@@ -3,6 +3,7 @@ package com.kanicream.flowlens.analysis.kotlin
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiMethod
+import com.intellij.psi.PsiNamedElement
 import com.intellij.psi.util.PsiTreeUtil
 import com.kanicream.flowlens.analysis.DirectFlowExtraction
 import com.kanicream.flowlens.analysis.ExtractedCall
@@ -33,6 +34,7 @@ import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.KtNameReferenceExpression
 import org.jetbrains.kotlin.psi.KtObjectLiteralExpression
 import org.jetbrains.kotlin.psi.KtPrimaryConstructor
+import org.jetbrains.kotlin.psi.KtSafeQualifiedExpression
 import org.jetbrains.kotlin.psi.KtSecondaryConstructor
 import org.jetbrains.kotlin.psi.KtTryExpression
 import org.jetbrains.kotlin.psi.KtWhenExpression
@@ -100,7 +102,17 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
         // call is a generated member and keeps the name the author wrote.
         val landedOnCallable = resolved is KtNamedFunction ||
             (resolved is PsiMethod && !resolved.isConstructor)
-        if (!landedOnCallable && calleeName != null && calleeName != ownerTypeName(resolved)) {
+        // Resolution landing on the declaration the author actually named — a
+        // function-typed property or parameter being invoked, `handler()` or
+        // `cb()` — is an ordinary call, not a generated member. Only a result
+        // that names neither the callee nor its type is the compiler filling in
+        // a member that has no declaration.
+        val resolvedName = (resolved as? PsiNamedElement)?.name
+        if (!landedOnCallable &&
+            calleeName != null &&
+            calleeName != resolvedName &&
+            calleeName != ownerTypeName(resolved)
+        ) {
             return generatedMemberOf(resolved, calleeName)
         }
 
@@ -272,8 +284,11 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                     element.finallyBlock?.let(::walk)
                 }
                 is KtBinaryExpression -> {
+                    // `?:` short-circuits like `&&` and `||`: the right side runs
+                    // only when the left produced null.
                     val shortCircuit = element.operationToken == KtTokens.ANDAND ||
-                        element.operationToken == KtTokens.OROR
+                        element.operationToken == KtTokens.OROR ||
+                        element.operationToken == KtTokens.ELVIS
                     if (!shortCircuit) {
                         element.children.forEach(::walk)
                         return
@@ -281,6 +296,12 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                     controlFlowSimplified = true
                     element.left?.let(::walk)
                     conditional { element.right?.let(::walk) }
+                }
+                is KtSafeQualifiedExpression -> {
+                    // `a?.f()` calls f only when the receiver is not null.
+                    controlFlowSimplified = true
+                    element.receiverExpression.let(::walk)
+                    conditional { element.selectorExpression?.let(::walk) }
                 }
                 else -> element.children.forEach(::walk)
             }

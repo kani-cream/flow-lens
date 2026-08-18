@@ -26,13 +26,13 @@ class FlowLensPanel(project: Project) : JPanel(BorderLayout()), Disposable {
         // The status needs the full width to be readable, so it gets its own row
         // under the toolbar rather than competing with it for space
         // (`VISUAL_DESIGN.md` §3).
+        val toolbar = FlowToolbar(project, controller)
+        // Zooming from the canvas must refresh the toolbar's percentage.
+        controller.onViewStateChanged = toolbar::refresh
         val header = JPanel(BorderLayout()).apply {
             add(
                 JPanel(BorderLayout()).apply {
-                    add(
-                        FlowToolbar(project, controller).createComponent(this@FlowLensPanel),
-                        BorderLayout.WEST,
-                    )
+                    add(toolbar.createComponent(this@FlowLensPanel), BorderLayout.WEST)
                 },
                 BorderLayout.NORTH,
             )

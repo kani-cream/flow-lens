@@ -168,6 +168,38 @@ class KotlinFlowAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
         assertFalse(target.isConstructor)
     }
 
+    fun `test invoking a function-typed value is an ordinary call`() {
+        // Regression: resolution of `handler()` lands on the property, which the
+        // generated-member rule mistook for a compiler-generated member and
+        // labelled as generated code.
+        val extraction = extractionOf(
+            """
+            class Service {
+                val handler: () -> Unit = {}
+                fun run() { handler() }
+            }
+            """.trimIndent(),
+        )
+        val target = analyzer.resolveCall(extraction.calls.single())
+        assertEquals("handler()", target.symbol!!.displayName)
+        assertFalse(
+            "an authored function value is not compiler-generated",
+            target.sourceOrigin == SourceOrigin.SYNTHETIC,
+        )
+        assertFalse(target.isConstructor)
+    }
+
+    fun `test invoking a function parameter is an ordinary call`() {
+        val extraction = extractionOf(
+            """
+            fun run(cb: () -> Unit) { cb() }
+            """.trimIndent(),
+        )
+        val target = analyzer.resolveCall(extraction.calls.single())
+        assertEquals("cb()", target.symbol!!.displayName)
+        assertFalse(target.sourceOrigin == SourceOrigin.SYNTHETIC)
+    }
+
     fun `test a real constructor call is still a constructor`() {
         val extraction = extractionOf(
             """
