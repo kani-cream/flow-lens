@@ -134,7 +134,11 @@ class KotlinFlowAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
         assertFalse(target.hasAnalyzableBody)
     }
 
-    fun `test data class copy is synthetic and never recursable`() {
+    fun `test data class copy is reported as a generated member not a constructor`() {
+        // Regression: `copy` has no declaration of its own, so the reference
+        // resolves to the class. Treating that as a constructor call made the
+        // canvas show `u.copy()` as `User()` with a `new` badge — a generated
+        // member presented as authored code.
         val extraction = extractionOf(
             """
             data class User(val name: String)
@@ -142,14 +146,15 @@ class KotlinFlowAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
             """.trimIndent(),
         )
         val target = analyzer.resolveCall(extraction.calls.single())
+        assertEquals("copy()", target.symbol!!.displayName)
+        assertEquals("User", target.symbol!!.containerName)
+        assertFalse("a generated member is not a constructor call", target.isConstructor)
+        assertEquals(SourceOrigin.SYNTHETIC, target.sourceOrigin)
         assertFalse("synthetic copy() must not be recursable", target.hasAnalyzableBody)
-        assertTrue(
-            "copy() must be classified SYNTHETIC or terminal, was ${target.sourceOrigin}",
-            target.sourceOrigin != SourceOrigin.PHYSICAL_SOURCE || !target.hasAnalyzableBody,
-        )
+        assertNotNull("it still navigates to the declaration that generates it", target.declaration)
     }
 
-    fun `test data class componentN is not a physical recursive target`() {
+    fun `test data class componentN is reported under its own name`() {
         val extraction = extractionOf(
             """
             data class User(val name: String)
@@ -157,7 +162,70 @@ class KotlinFlowAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
             """.trimIndent(),
         )
         val target = analyzer.resolveCall(extraction.calls.single())
+        assertEquals("component1()", target.symbol!!.displayName)
+        assertEquals(SourceOrigin.SYNTHETIC, target.sourceOrigin)
         assertFalse(target.hasAnalyzableBody)
+        assertFalse(target.isConstructor)
+    }
+
+    fun `test invoking a function-typed value is an ordinary call`() {
+        // Regression: resolution of `handler()` lands on the property, which the
+        // generated-member rule mistook for a compiler-generated member and
+        // labelled as generated code.
+        val extraction = extractionOf(
+            """
+            class Service {
+                val handler: () -> Unit = {}
+                fun run() { handler() }
+            }
+            """.trimIndent(),
+        )
+        val target = analyzer.resolveCall(extraction.calls.single())
+        assertEquals("handler()", target.symbol!!.displayName)
+        assertFalse(
+            "an authored function value is not compiler-generated",
+            target.sourceOrigin == SourceOrigin.SYNTHETIC,
+        )
+        assertFalse(target.isConstructor)
+    }
+
+    fun `test invoking a function parameter is an ordinary call`() {
+        val extraction = extractionOf(
+            """
+            fun run(cb: () -> Unit) { cb() }
+            """.trimIndent(),
+        )
+        val target = analyzer.resolveCall(extraction.calls.single())
+        assertEquals("cb()", target.symbol!!.displayName)
+        assertFalse(target.sourceOrigin == SourceOrigin.SYNTHETIC)
+    }
+
+    fun `test a real constructor call is still a constructor`() {
+        val extraction = extractionOf(
+            """
+            data class User(val name: String)
+            fun run() { User("a") }
+            """.trimIndent(),
+        )
+        val target = analyzer.resolveCall(extraction.calls.single())
+        assertEquals("User()", target.symbol!!.displayName)
+        assertTrue(target.isConstructor)
+        assertEquals(SourceOrigin.PHYSICAL_SOURCE, target.sourceOrigin)
+    }
+
+    fun `test a constructor call and a generated member are distinguishable in one body`() {
+        val extraction = extractionOf(
+            """
+            data class User(val name: String)
+            fun run() {
+                val u = User("a")
+                u.copy()
+            }
+            """.trimIndent(),
+        )
+        val targets = extraction.calls.map { analyzer.resolveCall(it) }
+        assertEquals(listOf("User()", "copy()"), targets.map { it.symbol!!.displayName })
+        assertEquals(listOf(true, false), targets.map { it.isConstructor })
     }
 
     fun `test explicitly authored member of data class stays analyzable`() {

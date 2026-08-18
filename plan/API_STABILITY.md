@@ -332,6 +332,29 @@ Fail build/release for:
 
 If approved exceptions exist, CI must prevent the warning set from silently growing. Prefer an exact allowlist/provenance record over accepting “N warnings”.
 
+### CI usage policy
+
+Flow Lens lives in a private repository, where hosted Actions minutes are a
+limited budget and an IntelliJ platform build is expensive. CI is a final gate,
+not an iteration loop:
+
+1. Everything is verified locally first — full build, tests, and Plugin
+   Verifier all run on a developer machine in well under the time a hosted run
+   takes.
+2. Code review completes before a change is pushed for verification. Asking CI
+   to validate code that has not been read yet wastes the budget on work that is
+   likely to change.
+3. Draft pull requests do not trigger runs; a run happens when the change is
+   believed finished.
+4. Superseded runs are cancelled rather than allowed to finish.
+5. Documentation-only changes do not trigger runs.
+6. The expensive release checks — Plugin Verifier and the distribution ZIP —
+   run on explicit request rather than on every commit, because they are already
+   executed locally before a milestone is closed.
+
+The verifier requirement in this document is about evidence existing before a
+milestone or release is accepted, not about running it on every push.
+
 ### CI resource lesson
 
 IntelliJ distributions, verifier IDEs, and Gradle transforms can consume tens of GB on hosted runners. Repo Lens hit disk exhaustion during CI.

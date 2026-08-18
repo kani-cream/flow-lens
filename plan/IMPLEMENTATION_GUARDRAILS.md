@@ -367,7 +367,7 @@ FlowLensController / Presenter
   binds service events to view models/actions
 
 FlowToolbar
-  Analyze / Stop / depth / settings entry points
+  Analyze / Stop / fit / settings entry points
 
 FlowCanvas
   semantic map rendering + hit testing + pan/zoom
@@ -383,6 +383,10 @@ FlowStatusModel / StatusView
 ```
 
 The exact class names may differ, but the responsibilities must stay separable and testable.
+
+Analysis bounds live in settings, not on the toolbar (owner decision,
+2026-08-17): their value applies to the next run, so placing them beside a
+running analysis implies an effect on the current result that they do not have.
 
 ---
 

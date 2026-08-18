@@ -186,6 +186,46 @@ class GoFlowAnalyzerTest : BasePlatformTestCase() {
         assertNull(analyzer.findEntryPoint(file, myFixture.caretOffset))
     }
 
+    fun `test a method is named by its receiver and scoped to its package`() {
+        // Regression: the receiver used to be the container as well as part of the
+        // name, so the canvas printed `Server.Server.Start()`; and a same-package
+        // function then looked like it crossed a package boundary.
+        val file = myFixture.configureByText(
+            "scope.go",
+            """
+            package sample
+
+            type Server struct{}
+
+            func (s *Server) Start() { helper() }
+
+            func helper() { }
+
+            func run(s *Server) { s.Start() }
+            """.trimIndent(),
+        )
+        val declarations = PsiTreeUtil
+            .findChildrenOfType(file, GoFunctionOrMethodDeclaration::class.java)
+        val method = declarations.first { it.name == "Start" }
+        val function = declarations.first { it.name == "helper" }
+
+        val methodSymbol = analyzer.describeCallable(method)
+        assertEquals("Server.Start()", methodSymbol.displayName)
+        assertEquals(
+            "the scope a Go call can leave is the package, not the receiver",
+            "sample",
+            methodSymbol.containerName,
+        )
+
+        val functionSymbol = analyzer.describeCallable(function)
+        assertEquals("helper()", functionSymbol.displayName)
+        assertEquals("sample", functionSymbol.containerName)
+        assertFalse(
+            "same-package callables share a container so neither gets qualified",
+            methodSymbol.containerName != functionSymbol.containerName,
+        )
+    }
+
     fun `test go analyzer is registered through the optional descriptor`() {
         assertTrue(FlowAnalyzerRegistry.availableLanguageIds().contains("go"))
     }

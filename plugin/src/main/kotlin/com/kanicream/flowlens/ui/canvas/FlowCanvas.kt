@@ -5,10 +5,12 @@ import com.intellij.ui.scale.JBUIScale
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.UIUtil
 import com.kanicream.flowlens.FlowLensBundle
+import com.kanicream.flowlens.analysis.FlowAnalyzerCapabilities
 import com.kanicream.flowlens.core.model.FlowAnalysisResult
 import com.kanicream.flowlens.core.model.NodeId
 import java.awt.BasicStroke
 import java.awt.Color
+import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
@@ -22,7 +24,9 @@ import java.awt.event.MouseEvent
 import java.awt.event.MouseWheelEvent
 import java.awt.geom.AffineTransform
 import javax.swing.JComponent
+import javax.swing.JViewport
 import javax.swing.SwingUtilities
+import javax.swing.ToolTipManager
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -38,7 +42,10 @@ class FlowCanvas : JComponent() {
 
     var onSelectionChanged: (CardVM?) -> Unit = {}
     var onNavigateToTarget: (CardVM) -> Unit = {}
+    var onNavigateToCallSite: (CardVM) -> Unit = {}
     var onNavigateToFrameEntry: (FrameVM) -> Unit = {}
+    var onContextMenu: (Point) -> Unit = {}
+    var onEntrySelected: () -> Unit = {}
 
     private var result: FlowAnalysisResult? = null
     private val expandedNodes = mutableSetOf<NodeId>()
@@ -46,12 +53,15 @@ class FlowCanvas : JComponent() {
     private var visibleCards: List<CardVM> = emptyList()
     private var visibleFrames: List<FrameVM> = emptyList()
     private var selectedNodeId: NodeId? = null
+    private var entrySelected = false
     private var zoom = 1.0
+    private var hoveredExpander: NodeId? = null
     private var dragStart: Point? = null
     private var dragOrigin: Point? = null
 
     init {
         isFocusable = true
+        ToolTipManager.sharedInstance().registerComponent(this)
         installMouseHandling()
         installKeyboardHandling()
     }
@@ -63,32 +73,107 @@ class FlowCanvas : JComponent() {
         if (runChanged) {
             expandedNodes.clear()
             selectedNodeId = null
+            entrySelected = false
             zoom = 1.0
             onSelectionChanged(null)
+            onZoomChanged()
         }
         rebuild()
     }
 
     fun selectedCard(): CardVM? = visibleCards.firstOrNull { it.nodeId == selectedNodeId }
 
-    fun toggleExpansion(card: CardVM) {
-        if (!card.expandable) return
+    /** The entry frame when it is the current selection, for navigation actions. */
+    fun selectedEntry(): FrameVM? = rootVM?.takeIf { entrySelected }
+
+    /** Returns true when the expansion state actually changed. */
+    fun toggleExpansion(card: CardVM): Boolean {
+        if (!card.expandable) return false
         if (!expandedNodes.remove(card.nodeId)) expandedNodes += card.nodeId
         rebuild()
+        return true
     }
 
+    private fun expand(card: CardVM): Boolean {
+        if (!card.expandable || card.expanded) return false
+        expandedNodes += card.nodeId
+        rebuild()
+        return true
+    }
+
+    private fun collapse(card: CardVM): Boolean {
+        if (!expandedNodes.remove(card.nodeId)) return false
+        rebuild()
+        return true
+    }
+
+    /** Current zoom as a percentage, for the toolbar indicator. */
+    val zoomPercent: Int get() = (zoom * 100).roundToInt()
+
+    var onZoomChanged: () -> Unit = {}
+
+    fun zoomIn() = applyZoom(zoom * CanvasZoom.STEP)
+
+    fun zoomOut() = applyZoom(zoom / CanvasZoom.STEP)
+
+    fun resetZoom() = applyZoom(1.0)
+
+    /**
+     * Scales the map so the whole flow fits the viewport. The target zoom is
+     * derived from content and viewport size only, so pressing Fit repeatedly
+     * always lands on the same result.
+     */
     fun fitToView() {
         val bounds = rootVM?.bounds ?: return
-        val viewport = visibleRect.takeIf { it.width > 0 && it.height > 0 } ?: return
-        val contentW = bounds.x + bounds.width + CanvasMetrics.CANVAS_MARGIN
-        val contentH = bounds.y + bounds.height + CanvasMetrics.CANVAS_MARGIN
-        val scale = min(
-            viewport.width.toDouble() / scaled(contentW),
-            viewport.height.toDouble() / scaled(contentH),
-        )
-        zoom = (zoom * scale).coerceIn(MIN_ZOOM, MAX_ZOOM)
+        val viewport = viewportSize() ?: return
+        val target = CanvasZoom.fitZoom(
+            contentWidth = bounds.x + bounds.width + CanvasMetrics.CANVAS_MARGIN,
+            contentHeight = bounds.y + bounds.height + CanvasMetrics.CANVAS_MARGIN,
+            viewportWidth = viewport.width,
+            viewportHeight = viewport.height,
+            uiScale = JBUIScale.scale(1f).toDouble(),
+        ) ?: return
+        zoom = target
         refreshGeometry()
-        scrollRectToVisible(Rectangle(0, 0, 1, 1))
+        onZoomChanged()
+        // Fitting shows everything, so the map starts at its origin.
+        SwingUtilities.invokeLater { scrollRectToVisible(Rectangle(0, 0, 1, 1)) }
+    }
+
+    /**
+     * The space actually available for the map. `visibleRect` reports the
+     * component's own visible part, which collapses to the content size when the
+     * content is smaller than the window and would make fitting meaningless.
+     */
+    private fun viewportSize(): Dimension? {
+        val extent = (parent as? JViewport)?.extentSize ?: visibleRect.size
+        return extent.takeIf { it.width > 0 && it.height > 0 }
+    }
+
+    /** Zooms around the viewport centre so the content under the eye stays put. */
+    private fun applyZoom(target: Double) {
+        val clamped = CanvasZoom.clamp(target)
+        if (clamped == zoom) return
+        val viewport = visibleRect
+        val centerX = (viewport.x + viewport.width / 2) / totalScale()
+        val centerY = (viewport.y + viewport.height / 2) / totalScale()
+        zoom = clamped
+        refreshGeometry()
+        onZoomChanged()
+        if (viewport.width <= 0 || viewport.height <= 0) return
+        // The scroll pane needs the new preferred size before the viewport can be
+        // repositioned, so recentre after this layout pass.
+        SwingUtilities.invokeLater {
+            val scale = totalScale()
+            scrollRectToVisible(
+                Rectangle(
+                    max(0, (centerX * scale - viewport.width / 2).roundToInt()),
+                    max(0, (centerY * scale - viewport.height / 2).roundToInt()),
+                    viewport.width,
+                    viewport.height,
+                ),
+            )
+        }
     }
 
     override fun getPreferredSize(): Dimension {
@@ -120,51 +205,132 @@ class FlowCanvas : JComponent() {
 
     // ---- painting ----
 
+    /**
+     * Empty state: how to start, plus which language integrations are usable.
+     * An unavailable integration is shown with its reason instead of silently
+     * producing nothing when the user tries that language (guardrails §3.1).
+     */
     private fun paintEmptyHint(g2: Graphics2D) {
-        g2.color = JBColor.GRAY
         g2.font = JBUI.Fonts.label()
-        val hint = FlowLensBundle.message("toolwindow.empty.hint")
         val fm = g2.fontMetrics
-        g2.drawString(hint, max(12, (width - fm.stringWidth(hint)) / 2), height / 2)
+        val hint = FlowLensBundle.message("toolwindow.empty.hint")
+        var y = height / 2 - fm.height
+        g2.color = Palette.mutedText
+        g2.drawString(hint, max(12, (width - fm.stringWidth(hint)) / 2), y)
+
+        g2.font = JBUI.Fonts.smallFont()
+        val small = g2.fontMetrics
+        for (capability in FlowAnalyzerCapabilities.current()) {
+            y += small.height + 4
+            val text = if (capability.available) {
+                "✓  ${capability.displayName}"
+            } else {
+                "—  ${FlowLensBundle.message(
+                    "capability.unavailable",
+                    capability.displayName,
+                    capability.requirement,
+                )}"
+            }
+            g2.color = if (capability.available) Palette.text else Palette.mutedText
+            g2.drawString(text, max(12, (width - small.stringWidth(text)) / 2), y)
+        }
+
+        // The keyboard contract is easiest to learn before there is anything to
+        // read on the canvas; it disappears as soon as a flow is drawn.
+        y += small.height + 12
+        val keys = FlowLensBundle.message("toolwindow.key.hints")
+        g2.color = Palette.mutedText
+        g2.drawString(keys, max(12, (width - small.stringWidth(keys)) / 2), y)
     }
 
+    /** Only the root frame draws a container of its own; calls own their bodies. */
     private fun paintFrame(g2: Graphics2D, frame: FrameVM) {
         val b = frame.bounds
-        // Frame container.
-        g2.color = if (frame.isRoot) Palette.rootFrameBg else Palette.frameBg
+        g2.color = Palette.rootFrameBg
         g2.fillRoundRect(b.x, b.y, b.width, b.height, 16, 16)
-        g2.color = if (frame.isRoot) Palette.rootFrameBorder else Palette.frameBorder
-        g2.stroke = BasicStroke(if (frame.isRoot) 2f else 1f)
+        g2.color = Palette.rootFrameBorder
+        g2.stroke = BasicStroke(2f)
         g2.drawRoundRect(b.x, b.y, b.width, b.height, 16, 16)
-        // Header.
+        if (entrySelected) paintSelectionRing(g2, b, 16)
+
         g2.font = JBUI.Fonts.label().asBold()
         g2.color = Palette.text
         val headerY = b.y + 21
-        val prefix = if (frame.isRoot) "▶ " else ""
-        g2.drawString(prefix + frame.title, b.x + CanvasMetrics.FRAME_PADDING, headerY)
+        g2.drawString("▶ " + frame.title, b.x + CanvasMetrics.FRAME_PADDING, headerY)
         g2.font = JBUI.Fonts.smallFont()
         g2.color = Palette.mutedText
-        val entryTag = if (frame.isRoot) FlowLensBundle.message("card.entry.badge") + " · " else ""
-        g2.drawString(entryTag + frame.subtitle, b.x + CanvasMetrics.FRAME_PADDING, headerY + 13)
+        g2.drawString(
+            FlowLensBundle.message("card.entry.badge") + " · " + frame.subtitle,
+            b.x + CanvasMetrics.FRAME_PADDING,
+            headerY + 13,
+        )
 
+        paintCards(g2, frame, bodyTop = b.y + CanvasMetrics.FRAME_HEADER)
+    }
+
+    /**
+     * Paints one frame's cards in order with the sequence connectors between
+     * them. The first card has no predecessor, so when it is one that may not run
+     * it gets a lead-in connector of its own: otherwise a conditional first call
+     * would look exactly like one that always runs.
+     */
+    private fun paintCards(g2: Graphics2D, frame: FrameVM, bodyTop: Int) {
         var previous: CardVM? = null
         for (card in frame.cards) {
-            previous?.let { paintConnector(g2, it, card) }
-            paintCard(g2, card)
-            card.childFrame?.let { paintFrame(g2, it) }
+            if (previous == null) {
+                if (card.dashedIncomingConnector) paintLeadIn(g2, card, bodyTop)
+            } else {
+                paintConnector(g2, previous, card)
+            }
+            paintCardTree(g2, card)
+            if (card.depthLimited) paintDepthLimitStub(g2, card)
             previous = card
         }
     }
 
+    /** A short non-certain connector from the body's start into its first call. */
+    private fun paintLeadIn(g2: Graphics2D, card: CardVM, bodyTop: Int) {
+        val x = card.bounds.x + card.bounds.width / 2
+        val yEnd = card.bounds.y
+        if (yEnd - bodyTop < 6) return
+        g2.color = Palette.connector
+        g2.stroke = DASHED_STROKE
+        g2.drawLine(x, bodyTop, x, yEnd - 2)
+        g2.fillPolygon(
+            intArrayOf(x - 4, x + 4, x),
+            intArrayOf(yEnd - 6, yEnd - 6, yEnd - 1),
+            3,
+        )
+    }
+
+    /** Explicit continuation marker: more code exists but was not analyzed. */
+    private fun paintDepthLimitStub(g2: Graphics2D, card: CardVM) {
+        val x = card.containerBounds.x + 14
+        val y = card.containerBounds.y + card.containerBounds.height
+        g2.color = Palette.connector
+        g2.stroke = DASHED_STROKE
+        g2.drawLine(x, y + 2, x, y + CanvasMetrics.LIMIT_STUB_HEIGHT - 6)
+        g2.font = JBUI.Fonts.smallFont()
+        g2.color = Palette.mutedText
+        g2.drawString(
+            FlowLensBundle.message("card.limit.depth.hint"),
+            x + 8,
+            y + CanvasMetrics.LIMIT_STUB_HEIGHT - 5,
+        )
+    }
+
+    /**
+     * The sequence connector between two siblings. It starts below everything the
+     * previous call owns — including an expanded body — so the line always
+     * expresses "the next step in this frame", never a call made by nested code.
+     */
     private fun paintConnector(g2: Graphics2D, from: CardVM, to: CardVM) {
-        val fromBottom = from.childFrame?.bounds?.let { it.y + it.height }
-            ?: (from.bounds.y + from.bounds.height)
-        val x = from.bounds.x + from.bounds.width / 2
+        val fromBottom = from.occupiedBottom
+        val x = from.containerBounds.x + from.containerBounds.width / 2
         val yEnd = to.bounds.y
         g2.color = Palette.connector
         g2.stroke = if (to.dashedIncomingConnector) DASHED_STROKE else SOLID_STROKE
         g2.drawLine(x, fromBottom + 2, x, yEnd - 2)
-        // Arrow head.
         g2.fillPolygon(
             intArrayOf(x - 4, x + 4, x),
             intArrayOf(yEnd - 6, yEnd - 6, yEnd - 1),
@@ -182,59 +348,113 @@ class FlowCanvas : JComponent() {
         }
     }
 
-    private fun paintCard(g2: Graphics2D, card: CardVM) {
-        val b = card.bounds
-        val selected = card.nodeId == selectedNodeId
+    /**
+     * An expanded call is drawn as one container: the card is its header and the
+     * analyzed body sits inside it. The sequence connector therefore leaves the
+     * container's edge instead of appearing to come out of the last nested call.
+     */
+    private fun paintCardTree(g2: Graphics2D, card: CardVM) {
+        paintCardBox(g2, card)
+        paintCardContent(g2, card)
+        val body = card.childFrame ?: return
+        // Separator between the call's own header and the body it contains.
+        val header = card.bounds
+        g2.color = Palette.cardBorder
+        g2.stroke = DASHED_STROKE
+        g2.drawLine(
+            header.x + 12,
+            header.y + header.height + CanvasMetrics.NESTED_TOP_GAP / 2,
+            header.x + header.width - 12,
+            header.y + header.height + CanvasMetrics.NESTED_TOP_GAP / 2,
+        )
+        paintCards(g2, body, bodyTop = header.y + header.height + CanvasMetrics.NESTED_TOP_GAP / 2)
+    }
+
+    /** Draws the box for a call: just the card, or the whole container when expanded. */
+    private fun paintCardBox(g2: Graphics2D, card: CardVM) {
+        val box = card.containerBounds
         g2.color = cardBackground(card.style)
-        g2.fillRoundRect(b.x, b.y, b.width, b.height, 12, 12)
-        g2.color = if (selected) Palette.selectionBorder else cardBorder(card.style)
+        g2.fillRoundRect(box.x, box.y, box.width, box.height, 12, 12)
+        // The element always keeps its own border: recolouring it for selection
+        // used to erase the state it encodes, such as an external target's border.
+        g2.color = cardBorder(card.style)
         g2.stroke = when {
-            selected -> BasicStroke(2f)
             card.style == CardStyle.UNRESOLVED || card.style == CardStyle.AMBIGUOUS -> DASHED_STROKE
             else -> SOLID_STROKE
         }
-        g2.drawRoundRect(b.x, b.y, b.width, b.height, 12, 12)
+        g2.drawRoundRect(box.x, box.y, box.width, box.height, 12, 12)
+        if (card.nodeId == selectedNodeId) paintSelectionRing(g2, box, 12)
+    }
 
-        val textX = b.x + 12
-        g2.font = JBUI.Fonts.label()
-        g2.color = if (card.style == CardStyle.LIMIT || card.style == CardStyle.CYCLE) {
-            Palette.mutedText
-        } else {
-            Palette.text
-        }
-        val glyph = when (card.style) {
-            CardStyle.UNRESOLVED -> "? "
-            CardStyle.AMBIGUOUS -> "◇ "
-            CardStyle.CYCLE, CardStyle.LIMIT -> ""
-            else -> ""
-        }
-        g2.drawString(truncate(g2, glyph + card.title, b.width - 60), textX, b.y + 19)
+    /**
+     * Selection is drawn as a ring outside the element, so it never competes with
+     * the element's own colour — including the entry frame, which is blue for a
+     * different reason.
+     */
+    private fun paintSelectionRing(g2: Graphics2D, box: Rectangle, arc: Int) {
+        g2.color = Palette.selectionBorder
+        g2.stroke = BasicStroke(2f)
+        val inset = SELECTION_RING_GAP
+        g2.drawRoundRect(
+            box.x - inset,
+            box.y - inset,
+            box.width + inset * 2,
+            box.height + inset * 2,
+            arc + inset,
+            arc + inset,
+        )
+    }
 
+    /**
+     * One line per call: state and execution glyphs, the callable, and a compact
+     * right-hand group for expansion state and depth. Everything else is in the
+     * details panel and the hover tooltip.
+     */
+    private fun paintCardContent(g2: Graphics2D, card: CardVM) {
+        val b = card.bounds
+        val baseline = b.y + b.height / 2 + 5
         g2.font = JBUI.Fonts.smallFont()
-        g2.color = Palette.mutedText
-        val secondLine = buildString {
-            card.subtitle?.let { append(it) }
-            if (card.expandable) {
-                if (isNotEmpty()) append("  ")
-                append(if (card.expanded) "▾ " else "▸ ")
-                append(FlowLensBundle.message("card.calls.inside", card.callsInside))
-            }
-        }
-        if (secondLine.isNotEmpty()) {
-            g2.drawString(truncate(g2, secondLine, b.width - 60), textX, b.y + 35)
-        }
-        // Depth tag, right-aligned.
-        g2.drawString(card.depthLabel, b.x + b.width - 34, b.y + 19)
 
-        if (card.badges.isNotEmpty()) {
-            g2.font = JBUI.Fonts.miniFont()
-            g2.color = Palette.badgeText
-            g2.drawString(
-                truncate(g2, card.badges.joinToString("  "), b.width - 24),
-                textX,
-                b.y + b.height - 8,
-            )
+        // Depth sits at the far right; the expand control keeps a fixed slot next
+        // to it so it is always in the same place and always hittable.
+        g2.color = Palette.mutedText
+        g2.drawString(card.depthLabel, b.x + b.width - CanvasMetrics.DEPTH_WIDTH + 4, baseline)
+
+        var rightEdge = b.x + b.width - CanvasMetrics.DEPTH_WIDTH
+        if (card.expandable) {
+            val expander = card.expanderBounds
+            if (card.nodeId == hoveredExpander) {
+                g2.color = Palette.expanderHover
+                g2.fillRoundRect(expander.x + 2, expander.y + 4, expander.width - 4, expander.height - 8, 8, 8)
+            }
+            g2.color = Palette.text
+            val label = (if (card.expanded) "▾ " else "▸ ") + card.callsInside
+            val labelWidth = g2.fontMetrics.stringWidth(label)
+            g2.drawString(label, expander.x + (expander.width - labelWidth) / 2, baseline)
+            rightEdge = expander.x
+        } else if (card.resolving) {
+            val label = FlowLensBundle.message("card.resolving")
+            g2.color = Palette.mutedText
+            g2.drawString(label, rightEdge - g2.fontMetrics.stringWidth(label) - 6, baseline)
+            rightEdge -= g2.fontMetrics.stringWidth(label) + 6
         }
+        card.trailingNote?.let { note ->
+            g2.color = Palette.mutedText
+            val noteWidth = g2.fontMetrics.stringWidth(note)
+            g2.drawString(note, rightEdge - noteWidth - 6, baseline)
+            rightEdge -= noteWidth + 6
+        }
+        val trailingWidth = b.x + b.width - rightEdge
+
+        val prefix = listOfNotNull(card.stateGlyph, card.executionGlyph).joinToString(" ")
+        g2.font = JBUI.Fonts.label()
+        g2.color = when (card.style) {
+            CardStyle.LIMIT, CardStyle.CYCLE -> Palette.mutedText
+            else -> Palette.text
+        }
+        val available = b.width - trailingWidth - 26
+        val text = if (prefix.isEmpty()) card.title else "$prefix ${card.title}"
+        g2.drawString(truncate(g2, text, available), b.x + 12, baseline)
     }
 
     private fun cardBackground(style: CardStyle): Color = when (style) {
@@ -268,22 +488,25 @@ class FlowCanvas : JComponent() {
             override fun mousePressed(e: MouseEvent) {
                 requestFocusInWindow()
                 val card = cardAt(e.point)
-                if (card == null) {
+                if (e.isPopupTrigger) {
+                    select(card)
+                    onContextMenu(e.point)
+                    return
+                }
+                if (card == null && frameHeaderAt(e.point) == null) {
                     dragStart = e.locationOnScreen
                     dragOrigin = visibleRect.location
-                    // Entry/frame headers open the frame's declaration
-                    // (V0.1_SPEC.md section 18: entry opens entry declaration).
-                    if (e.clickCount == 2) {
-                        frameHeaderAt(e.point)?.let(onNavigateToFrameEntry)
-                    }
+                }
+                if (card == null && frameHeaderAt(e.point) != null) {
+                    selectEntry()
+                    if (e.clickCount == 2) rootVM?.let(onNavigateToFrameEntry)
+                    return
                 }
                 select(card)
-                if (card != null && e.clickCount == 2) {
+                if (card == null) return
+                if (e.clickCount == 2) {
                     onNavigateToTarget(card)
-                } else if (card != null && card.expandable && e.clickCount == 1 &&
-                    e.y / totalScale() > card.bounds.y + 24
-                ) {
-                    // Click on the expander line toggles inline frame expansion.
+                } else if (card.expandable && card.expanderBounds.contains(toLogical(e.point))) {
                     toggleExpansion(card)
                 }
             }
@@ -291,6 +514,30 @@ class FlowCanvas : JComponent() {
             override fun mouseReleased(e: MouseEvent) {
                 dragStart = null
                 dragOrigin = null
+                // Popup triggers arrive on release on some platforms.
+                if (e.isPopupTrigger) {
+                    select(cardAt(e.point))
+                    onContextMenu(e.point)
+                }
+            }
+
+            override fun mouseMoved(e: MouseEvent) {
+                // The card shows compact glyphs, so hovering must be able to say
+                // the same thing in words.
+                val card = cardAt(e.point)
+                toolTipText = card?.tooltip?.takeIf { it.isNotBlank() }
+                val overExpander = card
+                    ?.takeIf { it.expandable && it.expanderBounds.contains(toLogical(e.point)) }
+                    ?.nodeId
+                if (overExpander != hoveredExpander) {
+                    hoveredExpander = overExpander
+                    cursor = if (overExpander != null) {
+                        Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                    } else {
+                        Cursor.getDefaultCursor()
+                    }
+                    repaint()
+                }
             }
 
             override fun mouseDragged(e: MouseEvent) {
@@ -304,9 +551,7 @@ class FlowCanvas : JComponent() {
 
             override fun mouseWheelMoved(e: MouseWheelEvent) {
                 if (e.isControlDown || e.isMetaDown) {
-                    val factor = if (e.wheelRotation < 0) 1.1 else 1 / 1.1
-                    zoom = (zoom * factor).coerceIn(MIN_ZOOM, MAX_ZOOM)
-                    refreshGeometry()
+                    if (e.wheelRotation < 0) zoomIn() else zoomOut()
                 } else {
                     parent?.dispatchEvent(SwingUtilities.convertMouseEvent(this@FlowCanvas, e, parent))
                 }
@@ -320,25 +565,55 @@ class FlowCanvas : JComponent() {
     private fun installKeyboardHandling() {
         addKeyListener(object : KeyAdapter() {
             override fun keyPressed(e: KeyEvent) {
-                when (e.keyCode) {
-                    KeyEvent.VK_DOWN -> moveSelection(1)
-                    KeyEvent.VK_UP -> moveSelection(-1)
-                    KeyEvent.VK_ENTER -> selectedCard()?.let(onNavigateToTarget)
-                    KeyEvent.VK_SPACE -> selectedCard()?.let(::toggleExpansion)
-                    KeyEvent.VK_ESCAPE -> select(null)
-                    else -> return
+                // Only consume keys that actually did something, so unused arrows
+                // still reach the scroll pane and pan a wide flow.
+                val handled = when {
+                    e.keyCode == KeyEvent.VK_DOWN -> moveSelection(1)
+                    e.keyCode == KeyEvent.VK_UP -> moveSelection(-1)
+                    // Enter, Shift+Enter, Space, and the zoom keys are registered
+                    // actions so they appear in the keymap and the context menu.
+                    e.keyCode == KeyEvent.VK_RIGHT -> selectedCard()?.let(::expand) == true
+                    e.keyCode == KeyEvent.VK_LEFT -> selectedCard()?.let(::collapse) == true
+                    isZoomShortcut(e) && e.keyCode == KeyEvent.VK_0 -> {
+                        resetZoom()
+                        true
+                    }
+                    e.keyCode == KeyEvent.VK_ESCAPE -> {
+                        // The entry keeps its selection in its own flag, so both
+                        // have to count as something Escape cleared.
+                        val hadSelection = selectedNodeId != null || entrySelected
+                        select(null)
+                        hadSelection
+                    }
+                    else -> false
                 }
-                e.consume()
+                if (handled) e.consume()
             }
         })
     }
 
-    private fun moveSelection(delta: Int) {
-        if (visibleCards.isEmpty()) return
+    private fun isZoomShortcut(e: KeyEvent): Boolean = e.isControlDown || e.isMetaDown
+
+    /** Returns true when the selection actually moved. */
+    private fun moveSelection(delta: Int): Boolean {
+        if (visibleCards.isEmpty()) return false
+        if (entrySelected) {
+            if (delta <= 0) return false
+            select(visibleCards.first())
+            scrollToCard(visibleCards.first())
+            return true
+        }
         val index = visibleCards.indexOfFirst { it.nodeId == selectedNodeId }
+        if (index == 0 && delta < 0) {
+            // Above the first call is the entry, so the sequence has a natural top.
+            selectEntry()
+            return true
+        }
         val next = (if (index < 0) 0 else index + delta).coerceIn(0, visibleCards.lastIndex)
+        if (next == index) return false
         select(visibleCards[next])
         scrollToCard(visibleCards[next])
+        return true
     }
 
     private fun scrollToCard(card: CardVM) {
@@ -356,7 +631,16 @@ class FlowCanvas : JComponent() {
 
     private fun select(card: CardVM?) {
         selectedNodeId = card?.nodeId
+        entrySelected = false
         onSelectionChanged(card)
+        repaint()
+    }
+
+    /** Selects the entry frame; the details panel describes it like any element. */
+    private fun selectEntry() {
+        selectedNodeId = null
+        entrySelected = rootVM != null
+        onEntrySelected()
         repaint()
     }
 
@@ -368,8 +652,9 @@ class FlowCanvas : JComponent() {
 
     private fun frameHeaderAt(point: Point): FrameVM? {
         val logical = toLogical(point)
-        // Deepest (nested) frame wins, so hit-test in reverse layout order.
-        return visibleFrames.lastOrNull { it.headerBounds.contains(logical) }
+        // Only the root frame draws a header; an expanded call is opened through
+        // its own card, which is that container's header.
+        return visibleFrames.lastOrNull { it.rendersHeader && it.headerBounds.contains(logical) }
     }
 
     private fun toLogical(point: Point): Point {
@@ -415,6 +700,7 @@ class FlowCanvas : JComponent() {
         val declaredBorder = JBColor(Color(0x9C7BD0), Color(0x8A6FC0))
         val selectionBorder = JBColor(Color(0x3574F0), Color(0x548AF7))
         val connector = JBColor(Color(0x8A8E99), Color(0x6F737A))
+        val expanderHover = JBColor(Color(0xDCE3EE), Color(0x3A4048))
         val boundaryText = JBColor(Color(0x9A7B2D), Color(0xC0A35E))
         val text = JBColor(Color(0x1D1F23), Color(0xDFE1E5))
         val mutedText = JBColor(Color(0x6C707E), Color(0x9DA0A8))
@@ -422,8 +708,7 @@ class FlowCanvas : JComponent() {
     }
 
     companion object {
-        private const val MIN_ZOOM = 0.25
-        private const val MAX_ZOOM = 2.5
+        private const val SELECTION_RING_GAP = 3
         private val SOLID_STROKE = BasicStroke(1.4f)
         private val DASHED_STROKE = BasicStroke(
             1.4f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 10f, floatArrayOf(4f, 4f), 0f,

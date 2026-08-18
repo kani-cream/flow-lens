@@ -102,7 +102,12 @@ Record:
 
 ### Layer F — Packaged artifact tests
 
-Build the actual distribution ZIP and install it in a clean/sandbox IntelliJ IDEA Ultimate.
+Build the actual distribution ZIP and inspect it every time release checks run.
+
+Manual exercise happens in the sandbox IDE for each milestone. Installing the
+built ZIP into a production IntelliJ IDEA Ultimate is a **v1.0 release
+acceptance step** (owner decision, 2026-08-17) and is not repeated for earlier
+milestones; the sandbox runs the same packaged plugin layout.
 
 Verify:
 

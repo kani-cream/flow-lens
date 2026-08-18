@@ -1,19 +1,43 @@
 name: Build
 
+# Actions minutes on a private repository are a limited budget, and an IntelliJ
+# platform build is expensive (IDE download, extracted transforms, verifier IDEs).
+# CI is therefore a final gate, not an iteration loop: everything is verified
+# locally first, and a run happens only when it can tell us something new.
+#
+#   - draft pull requests do not run at all;
+#   - superseded runs are cancelled instead of finishing;
+#   - documentation-only changes are skipped;
+#   - the expensive release checks (Plugin Verifier, distribution ZIP) run only
+#     when explicitly requested through workflow_dispatch.
 on:
-  push:
-    branches: [ main ]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths-ignore:
+      - '**.md'
+      - 'plan/**'
+      - 'docs/**'
+      - '.gitignore'
+  workflow_dispatch:
+    inputs:
+      release_checks:
+        description: 'Also run Plugin Verifier and build the distribution ZIP'
+        type: boolean
+        default: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
-    name: Build, test, verify
+    name: Build and test
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
-      # The IntelliJ Platform build needs tens of GB (IDE distributions, extracted
-      # transforms, two verifier IDEs); the stock runner image runs out of disk while
-      # saving the Gradle cache (Repo Lens hit this). Drop unused toolchains up front.
+      # IntelliJ distributions and extracted transforms need tens of GB; the
+      # stock runner image runs out of disk while saving the Gradle cache.
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -33,15 +57,60 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           # Extracted IDE distributions live under transforms and are re-derivable
-          # from the cached downloads; archiving them is what exhausts runner disk.
+          # from the cached downloads; archiving them is what exhausts the disk.
           gradle-home-cache-excludes: |
             caches/**/transforms
 
+      # -Pflowlens.ci skips buildSearchableOptions, which launches a headless IDE
+      # and costs minutes; the distribution job below builds it for real.
       - name: Build and test
-        run: ./gradlew build --no-daemon
+        run: ./gradlew build -Pflowlens.ci=true --no-daemon
+
+      # The Actions log API is not always reachable, so a failing run must leave
+      # behind enough evidence to identify the failing test without it.
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/**
+          if-no-files-found: ignore
+
+  release-checks:
+    name: Plugin Verifier and distribution
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.release_checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          df -h /
+
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-home-cache-excludes: |
+            caches/**/transforms
 
       - name: Plugin Verifier
         run: ./gradlew :plugin:verifyPlugin --no-daemon
+
+      - name: Build distribution
+        run: ./gradlew buildPlugin --no-daemon
 
       - name: Upload distribution
         uses: actions/upload-artifact@v4

@@ -2,10 +2,10 @@ package com.kanicream.flowlens.analysis.java
 
 import com.intellij.lang.java.JavaLanguage
 import com.intellij.psi.JavaTokenType
-import com.intellij.psi.PsiAnonymousClass
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiConditionalExpression
+import com.intellij.psi.PsiDoWhileStatement
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiIfStatement
@@ -19,6 +19,11 @@ import com.intellij.psi.PsiPolyadicExpression
 import com.intellij.psi.PsiSuperExpression
 import com.intellij.psi.PsiSwitchBlock
 import com.intellij.psi.PsiTryStatement
+import com.intellij.psi.search.searches.ClassInheritorsSearch
+import com.intellij.psi.search.searches.OverridingMethodsSearch
+import com.intellij.psi.util.CachedValueProvider
+import com.intellij.psi.util.CachedValuesManager
+import com.intellij.psi.util.PsiModificationTracker
 import com.intellij.psi.util.PsiTreeUtil
 import com.kanicream.flowlens.analysis.DirectFlowExtraction
 import com.kanicream.flowlens.analysis.ExtractedCall
@@ -104,9 +109,46 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
         return when {
             nonOverridable -> DispatchConfidence.EXACT
             method.body == null -> DispatchConfidence.AMBIGUOUS
-            else -> DispatchConfidence.DECLARED_TARGET
+            // Java methods are virtual by default, so reporting every ordinary
+            // call as "runtime override may differ" drowns the cases where that
+            // is actually true. The declared body is the only implementation
+            // unless something in the project overrides it.
+            isOverriddenInProject(method) -> DispatchConfidence.DECLARED_TARGET
+            else -> DispatchConfidence.EXACT
         }
     }
+
+    /**
+     * Whether some subclass overrides [method].
+     *
+     * Both searches are index-backed, bounded to the first hit, and cached per
+     * declaration until PSI changes, so a frame with many calls does not turn
+     * into a series of repeated searches. The cheap class-level question is asked
+     * first: most calls resolve to a type nothing extends, and then no
+     * per-method search happens at all.
+     *
+     * Runtime substitution that leaves no source behind — proxies, generated
+     * bytecode, dependency injection — is out of scope by design
+     * (`KNOWN_LIMITATIONS.md` §2).
+     */
+    private fun isOverriddenInProject(method: PsiMethod): Boolean {
+        val containingClass = method.containingClass ?: return false
+        if (!hasInheritors(containingClass)) return false
+        return CachedValuesManager.getCachedValue(method) {
+            CachedValueProvider.Result.create(
+                OverridingMethodsSearch.search(method).findFirst() != null,
+                PsiModificationTracker.MODIFICATION_COUNT,
+            )
+        }
+    }
+
+    private fun hasInheritors(psiClass: PsiClass): Boolean =
+        CachedValuesManager.getCachedValue(psiClass) {
+            CachedValueProvider.Result.create(
+                ClassInheritorsSearch.search(psiClass).findFirst() != null,
+                PsiModificationTracker.MODIFICATION_COUNT,
+            )
+        }
 
     private fun symbolOf(method: PsiMethod): FlowSymbol {
         val container = method.containingClass
@@ -125,6 +167,9 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
         val calls = mutableListOf<ExtractedCall>()
         var controlFlowSimplified = false
 
+        /** > 0 while walking code that may not execute (branch, loop body, catch). */
+        private var conditionalDepth = 0
+
         fun walk(element: PsiElement) {
             when (element) {
                 is PsiComment -> return
@@ -135,39 +180,89 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
                 is PsiMethodCallExpression -> {
                     element.methodExpression.qualifierExpression?.let(::walk)
                     element.argumentList.expressions.forEach(::walk)
-                    calls += ExtractedCall(
-                        callSite = element,
-                        kind = FlowNodeKind.CALL,
-                        calleeShortName = element.methodExpression.referenceName
-                            ?: element.methodExpression.text,
+                    addCall(
+                        element,
+                        FlowNodeKind.CALL,
+                        element.methodExpression.referenceName ?: element.methodExpression.text,
                     )
                 }
                 is PsiNewExpression -> {
                     element.qualifier?.let(::walk)
                     element.argumentList?.expressions?.forEach(::walk)
                     // An anonymous class body is a boundary; its arguments were walked above.
-                    calls += ExtractedCall(
-                        callSite = element,
-                        kind = FlowNodeKind.CONSTRUCTOR,
-                        calleeShortName = element.classReference?.referenceName ?: "new",
+                    addCall(
+                        element,
+                        FlowNodeKind.CONSTRUCTOR,
+                        element.classReference?.referenceName ?: "new",
                     )
                 }
-                else -> {
-                    if (isControlFlowConstruct(element)) controlFlowSimplified = true
-                    if (element is PsiAnonymousClass) return
+                is PsiIfStatement -> {
+                    controlFlowSimplified = true
+                    element.condition?.let(::walk)
+                    conditional { element.thenBranch?.let(::walk); element.elseBranch?.let(::walk) }
+                }
+                is PsiConditionalExpression -> {
+                    controlFlowSimplified = true
+                    walk(element.condition)
+                    conditional { element.thenExpression?.let(::walk); element.elseExpression?.let(::walk) }
+                }
+                is PsiDoWhileStatement -> {
+                    controlFlowSimplified = true
+                    // A do-while body and its condition both run at least once.
                     element.children.forEach(::walk)
                 }
+                is PsiLoopStatement -> {
+                    controlFlowSimplified = true
+                    // Everything but the loop body is walked in place; the body may
+                    // run zero times.
+                    element.children.filter { it !== element.body }.forEach(::walk)
+                    conditional { element.body?.let(::walk) }
+                }
+                is PsiSwitchBlock -> {
+                    controlFlowSimplified = true
+                    element.expression?.let(::walk)
+                    conditional { element.body?.let(::walk) }
+                }
+                is PsiTryStatement -> {
+                    controlFlowSimplified = true
+                    // try and finally blocks run; catch sections only on failure.
+                    element.resourceList?.let(::walk)
+                    element.tryBlock?.let(::walk)
+                    conditional { element.catchSections.forEach(::walk) }
+                    element.finallyBlock?.let(::walk)
+                }
+                is PsiPolyadicExpression -> {
+                    val shortCircuit = element.operationTokenType == JavaTokenType.ANDAND ||
+                        element.operationTokenType == JavaTokenType.OROR
+                    if (!shortCircuit) {
+                        element.children.forEach(::walk)
+                        return
+                    }
+                    controlFlowSimplified = true
+                    val operands = element.operands
+                    operands.firstOrNull()?.let(::walk)
+                    conditional { operands.drop(1).forEach(::walk) }
+                }
+                else -> element.children.forEach(::walk)
             }
         }
 
-        private fun isControlFlowConstruct(element: PsiElement): Boolean =
-            element is PsiIfStatement ||
-                element is PsiLoopStatement ||
-                element is PsiSwitchBlock ||
-                element is PsiConditionalExpression ||
-                element is PsiTryStatement ||
-                (element is PsiPolyadicExpression &&
-                    (element.operationTokenType == JavaTokenType.ANDAND ||
-                        element.operationTokenType == JavaTokenType.OROR))
+        private fun addCall(callSite: PsiElement, kind: FlowNodeKind, shortName: String) {
+            calls += ExtractedCall(
+                callSite = callSite,
+                kind = kind,
+                calleeShortName = shortName,
+                conditional = conditionalDepth > 0,
+            )
+        }
+
+        private inline fun conditional(block: () -> Unit) {
+            conditionalDepth += 1
+            try {
+                block()
+            } finally {
+                conditionalDepth -= 1
+            }
+        }
     }
 }

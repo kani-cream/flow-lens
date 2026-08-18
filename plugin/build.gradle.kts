@@ -60,6 +60,10 @@ tasks.buildSearchableOptions {
     // The headless searchable-options build requires the IDE default (English)
     // locale; on a Japanese-locale machine it fails with "Locale must be default".
     jvmArgs("-Duser.language=en", "-Duser.country=US")
+    // It also launches a full headless IDE, which is one of the slowest steps in
+    // the build. Ordinary CI runs skip it to stay inside the Actions budget; the
+    // distribution job and local release builds still produce it.
+    onlyIf { !providers.gradleProperty("flowlens.ci").isPresent }
 }
 
 tasks.test {
@@ -75,6 +79,13 @@ tasks.test {
         "flowlens.classes.dir",
         layout.buildDirectory.dir("classes/kotlin/main").get().asFile.absolutePath,
     )
+    // For RealSourceSmokeTest: this repository's own sources are the dogfooding
+    // corpus, so the smoke test analyzes real code shapes rather than fixtures.
+    systemProperty("flowlens.repoRoot", rootProject.projectDir.absolutePath)
+    // CI runners have no display. Running headless locally too means a
+    // headless-unsafe UI call fails on the developer machine that introduced it
+    // rather than on the hosted runner minutes later.
+    systemProperty("java.awt.headless", "true")
 }
 
 intellijPlatform {
