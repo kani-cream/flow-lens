@@ -20,6 +20,20 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>0.3.0 — Developer workflow.</b></p>
+        <ul>
+            <li><b>Flow Pins</b>: mark a function and it stands out in every flow
+            that reaches it, across restarts.</li>
+            <li><b>Saved Flows</b>: keep an entry point with the limits it was
+            analyzed at, and re-run it later exactly as it was.</li>
+            <li><b>Recent analyses</b>: the last ten entry points, one click away.</li>
+            <li><b>Analyze from Here</b>: promote the selected call's target to the
+            new root.</li>
+            <li>A running analysis now names the callable it is working on and
+            shows how much of the node budget is spent; a finished one summarizes
+            why its map stops where it does, and each count leads to the card.</li>
+        </ul>
+
         <p><b>0.2.0 — Control flow on the map.</b></p>
         <ul>
             <li>Branches, multi-way branches, loops, and exception handling are now
