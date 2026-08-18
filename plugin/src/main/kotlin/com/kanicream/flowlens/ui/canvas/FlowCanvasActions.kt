@@ -10,6 +10,7 @@ import com.intellij.openapi.actionSystem.CustomShortcutSet
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.project.DumbAware
+import com.intellij.openapi.util.SystemInfo
 import com.kanicream.flowlens.FlowLensBundle
 import java.awt.Point
 import java.awt.event.InputEvent
@@ -80,8 +81,13 @@ class FlowCanvasActions(private val canvas: FlowCanvas, parent: Disposable) {
         perform = perform,
     )
 
+    /**
+     * The platform's menu modifier, derived from the OS rather than from the
+     * toolkit: `Toolkit.getMenuShortcutKeyMaskEx` throws in a headless JVM, which
+     * made building the tool window fail outright on a headless host.
+     */
     private fun menuMask(): Int =
-        java.awt.Toolkit.getDefaultToolkit().menuShortcutKeyMaskEx
+        if (SystemInfo.isMac) InputEvent.META_DOWN_MASK else InputEvent.CTRL_DOWN_MASK
 
     private class CanvasAction(
         text: String,

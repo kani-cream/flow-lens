@@ -82,6 +82,10 @@ tasks.test {
     // For RealSourceSmokeTest: this repository's own sources are the dogfooding
     // corpus, so the smoke test analyzes real code shapes rather than fixtures.
     systemProperty("flowlens.repoRoot", rootProject.projectDir.absolutePath)
+    // CI runners have no display. Running headless locally too means a
+    // headless-unsafe UI call fails on the developer machine that introduced it
+    // rather than on the hosted runner minutes later.
+    systemProperty("java.awt.headless", "true")
 }
 
 intellijPlatform {
