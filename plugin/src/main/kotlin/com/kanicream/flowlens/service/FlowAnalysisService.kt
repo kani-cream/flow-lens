@@ -1,6 +1,8 @@
 package com.kanicream.flowlens.service
 
 import com.intellij.openapi.application.runReadActionBlocking
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
@@ -49,6 +51,12 @@ class FlowAnalysisService(
         val file: VirtualFile,
         val offset: Int,
         val limits: FlowLimits,
+        /**
+         * Resolved when the run starts, on the caller's thread. Deriving it later
+         * would need a read action on the publishing path, which deadlocks a run
+         * whose caller is blocked waiting for that very result.
+         */
+        val relativePath: String,
         val rootHandle: LocationId? = null,
     )
 
@@ -71,6 +79,7 @@ class FlowAnalysisService(
      */
     fun startAnalysis(file: VirtualFile, offset: Int, limits: FlowLimits? = null): RunId {
         val effectiveLimits = limits ?: FlowLensSettings.getInstance(project).snapshot()
+        val relativePath = FlowEntryRef.relativePathOf(project, file)
         val runId = RunId(runCounter.incrementAndGet())
         val handles = RunHandles(project)
         val previous: Job?
@@ -78,7 +87,7 @@ class FlowAnalysisService(
             previous = activeJob
             activeRunId = runId
             activeHandles = handles
-            lastRequest = AnalysisRequest(file, offset, effectiveLimits)
+            lastRequest = AnalysisRequest(file, offset, effectiveLimits, relativePath)
             // The old flow stops being current the moment a new root is requested
             // (REPO_LENS_LESSONS.md 3.6).
             mutableResults.value = null
@@ -162,8 +171,25 @@ class FlowAnalysisService(
         }
         val symbol = result.rootFrame?.symbol ?: return
         if (!request.file.isValid) return
-        FlowLensRecents.getInstance(project)
-            .record(FlowEntryRef.of(symbol, project, request.file), request.limits)
+        // Bookkeeping must not be able to fail an analysis: the result is already
+        // published (guardrails §9). Nothing here touches PSI, so it also cannot
+        // block the run behind a lock the waiting caller may be holding.
+        try {
+            FlowLensRecents.getInstance(project).record(
+                FlowEntryRef(
+                    key = symbol.key,
+                    languageId = symbol.languageId,
+                    displayName = symbol.displayName,
+                    containerName = symbol.containerName,
+                    path = request.relativePath,
+                ),
+                request.limits,
+            )
+        } catch (e: ProcessCanceledException) {
+            throw e
+        } catch (e: Exception) {
+            LOG.warn("Flow Lens could not record a recent flow: ${e.javaClass.simpleName}")
+        }
     }
 
     /** Internal for lifecycle tests: events from a non-current run must be dropped. */
@@ -175,6 +201,8 @@ class FlowAnalysisService(
     }
 
     companion object {
+        private val LOG = Logger.getInstance(FlowAnalysisService::class.java)
+
         fun getInstance(project: Project): FlowAnalysisService =
             project.getService(FlowAnalysisService::class.java)
     }
