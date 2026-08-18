@@ -68,6 +68,11 @@ class GoStructureExtractionTest : BasePlatformTestCase() {
             listOf("CASE(1)=[a]", "DEFAULT=[b]"),
             structure(items).branches.map(::branchShape),
         )
+        assertEquals(
+            "the init already has its own card before the container",
+            "x",
+            structure(items).summary,
+        )
     }
 
     fun `test L a select is a multi-way branch marked as a select`() {

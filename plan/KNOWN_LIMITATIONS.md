@@ -326,7 +326,20 @@ never written to logs or diagnostics (`IMPLEMENTATION_GUARDRAILS.md` §13).
 
 ---
 
-## 28. Maintenance rule
+## 28. A structure card names its kind in one vocabulary (v0.2)
+
+Every language shares one word per structure kind, so a Kotlin `when` and a Go
+type switch both render as `switch`, and a Kotlin `if` expression as `if`. The
+card names the kind of structure rather than the keyword that produced it.
+
+The consequence is that the label does not always match the keyword under the
+caret. A Go `select` is the one exception, because it chooses among
+communications rather than among values and reading it as a `switch` would be
+misleading.
+
+---
+
+## 29. Maintenance rule
 
 Whenever dogfooding, fixture testing, Plugin Verifier, or a user report reveals a surprising but currently accepted behavior:
 

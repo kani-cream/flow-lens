@@ -10,10 +10,12 @@ import java.io.IOException;
  *
  *   ⛨ try
  *       TRY                    send()
- *       CATCH "IOException"    retryLater()
+ *       CATCH IOException      retryLater()   the label is unquoted source text
  *       FINALLY                close()
- *   ↻ loop (runs at least once)          G: the card says so for a do-while
- *       EACH ITERATION   attempt(), keepGoing()   body first, condition after
+ *   ↻ loop (runs at least once) keepGoing()   G: the card says so for a do-while
+ *       EACH ITERATION
+ *           attempt()                        body first, condition after
+ *           keepGoing()
  *   ◀ return                             I: a bare return says only "return"
  *
  * Then analyze summarize(): its two returns must read differently — "return 0"

@@ -6,22 +6,25 @@ package main
 // Expected shape on the canvas:
 //
 //	lookup()                     K: the switch init runs before the container
-//	◈ switch mode
-//	    CASE "1"     fast()
+//	◈ switch mode                the title names the subject, not the init: the
+//	    CASE 1       fast()          init already has a card of its own
 //	    DEFAULT      slow()
 //	◈ select                     L: the card must say "select", not "switch"
-//	    CASE "v := <-ready()"    ready(), consume()
-//	    DEFAULT                  idle()
-//	                             the label's call is on the map, not just in
-//	                             the label text
+//	    CASE v := <-ready()      the label's call is on the map, not just in the
+//	        ready()                  label text, and it runs inside the case
+//	        consume(v)
+//	    DEFAULT      idle()
 //	◈ switch                     a tagless switch: the case label IS the
-//	    CASE "healthy()"         condition, so it runs inside its own section
-//	        healthy(), serve()
+//	    CASE healthy()               condition, so it runs inside its own section
+//	        healthy()
+//	        serve()
 //	    DEFAULT      degrade()
 //	queue()                      the range expression runs once, before the loop
-//	↻ loop                       containers nest
-//	    EACH ITERATION   ◆ if accepted()
-//	                         THEN  handle()
+//	↻ loop _, job := range queue()
+//	    EACH ITERATION           containers nest
+//	        accepted(job)        the nested condition runs first
+//	        ◆ if accepted(job)
+//	            THEN  handle(job)
 //	◀ return                     a terminal marker, not a call card
 //
 // The status bar must NOT warn: every construct here is represented.
@@ -57,7 +60,8 @@ func dispatch() {
 }
 
 // The loop condition repeats, so it belongs inside the container. Analyze
-// retryLoop() and check that attempt() appears once, inside the body.
+// retryLoop() and check that the card reads "↻ loop keepGoing()" with both
+// keepGoing() and attempt() inside EACH ITERATION, once each.
 func retryLoop() {
 	for keepGoing() {
 		attempt()

@@ -226,7 +226,7 @@ class V02AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
         val card = CanvasViewModelBuilder.build(result, emptySet())!!.cards.last()
         val kind = FlowLensBundle.message("card.kind.RETURN")
         assertEquals("$kind total()", card.title)
-        assertNotSame("a valued return must not read like a bare one", kind, card.title)
+        assertFalse("a valued return must not read like a bare one", card.title == kind)
         assertEquals(
             "the details panel agrees with the card",
             "${FlowLensBundle.message("enum.kind.RETURN")} total()",

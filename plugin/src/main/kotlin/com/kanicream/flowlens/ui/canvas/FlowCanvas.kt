@@ -245,15 +245,23 @@ class FlowCanvas : JComponent() {
         // The jump shortcut differs by platform and keymap, so the hint asks the
         // IDE what it currently is rather than naming a key that may belong to
         // the OS — F4 opens Spotlight on macOS.
-        val keys = FlowLensBundle.message("toolwindow.key.hints", jumpToSourceShortcutText())
+        val jump = jumpToSourceShortcutText()
+        val keys = if (jump == null) {
+            // Nothing is bound to Jump to Source, so the hint says nothing about it
+            // rather than naming a key that would do nothing.
+            FlowLensBundle.message("toolwindow.key.hints.no.jump")
+        } else {
+            FlowLensBundle.message("toolwindow.key.hints", jump)
+        }
         g2.color = Palette.mutedText
         g2.drawString(keys, max(12, (width - small.stringWidth(keys)) / 2), y)
     }
 
-    private fun jumpToSourceShortcutText(): String {
+    /** The current Jump to Source binding, or null when the keymap has none. */
+    private fun jumpToSourceShortcutText(): String? {
         val action = ActionManager.getInstance().getAction(IdeActions.ACTION_EDIT_SOURCE)
-            ?: return "F4"
-        return KeymapUtil.getFirstKeyboardShortcutText(action).ifEmpty { "F4" }
+            ?: return null
+        return KeymapUtil.getFirstKeyboardShortcutText(action).ifEmpty { null }
     }
 
     /** Only the root frame draws a container of its own; calls own their bodies. */

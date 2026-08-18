@@ -4,23 +4,34 @@ package demo
  * Manual sandbox root for Kotlin control flow (V0.2_SPEC.md cases D, F, G, H, M).
  * Put the caret in process() and run Analyze Flow.
  *
- * Expected shape on the canvas:
+ * Expected shape on the canvas. Note that a `when` is labelled `switch`: the
+ * card names the kind of structure, and v0.2 uses one word per kind across all
+ * three languages.
  *
- *   kind()                       the subject is evaluated before the container
- *   ◈ when kind()
- *       CASE "1"     express()
- *       CASE "2"     nothing            an empty entry is still shown
+ *   kind(code)                        the subject is evaluated before the container
+ *   ◈ switch kind(code)
+ *       CASE 1       express()
+ *       CASE 2       nothing          an empty entry is still shown
  *       DEFAULT      standard()
- *   ◈ when                       subjectless: the guard is what chooses the
- *       CASE "ready()"   ready(), start()   entry, so it sits INSIDE the entry
- *       DEFAULT          hold()
- *   orders()                     the range is evaluated once, before the loop
- *   ↻ loop                       containers nest
- *       EACH ITERATION   ◆ if valid()
- *                            THEN  submit()
- *   ↻ loop (runs at least once)  a do-while says so on the card
- *       EACH ITERATION   attempt(), keepGoing()
- *   ⛨ try / catch "IllegalStateException" / finally
+ *   ◈ switch                          subjectless, so the card has nothing to name
+ *       CASE ready()                  the guard is what chooses the entry, so it
+ *           ready()                     runs INSIDE the entry, as its own card
+ *           start()
+ *       DEFAULT      hold()
+ *   orders()                          evaluated once, before the loop
+ *   ↻ loop order in orders()         containers nest
+ *       EACH ITERATION
+ *           valid(order)              the nested condition runs first
+ *           ◆ if valid(order)
+ *               THEN  submit(order)
+ *   ↻ loop (runs at least once) keepGoing()
+ *       EACH ITERATION
+ *           attempt()                 body first, condition after
+ *           keepGoing()
+ *   ⛨ try
+ *       TRY                    send()
+ *       CATCH IllegalStateException   retryLater()
+ *       FINALLY                close()
  *   done()
  *
  * The status bar must NOT warn here. Then analyze risky(): the elvis operand
