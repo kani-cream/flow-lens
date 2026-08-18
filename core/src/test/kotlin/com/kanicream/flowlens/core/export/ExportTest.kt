@@ -23,6 +23,13 @@ class ExportTest {
     private fun symbol(name: String, container: String? = "Owner") =
         FlowSymbol("java", "$name()", container, "java:$container#$name()")
 
+    /** A location whose path is the kind an absolute one would be mistaken for. */
+    private fun location(index: Int) = com.kanicream.flowlens.core.model.FlowLocation(
+        com.kanicream.flowlens.core.model.LocationId(index),
+        "/Users/someone/secret/Owner.java",
+        index,
+    )
+
     private fun call(
         name: String,
         container: String? = "Owner",
@@ -31,7 +38,8 @@ class ExportTest {
         metadata: Map<String, String> = emptyMap(),
     ) = FlowEventSpec(
         kind = FlowNodeKind.CALL,
-        callSiteLocation = null,
+        callSiteLocation = location(1),
+        targetLocation = location(2),
         targetSymbol = symbol(name, container),
         resolutionStatus = resolution,
         dispatchConfidence = dispatch,
@@ -251,12 +259,38 @@ class ExportTest {
     }
 
     @Test
-    fun `T no absolute path appears in either format`() {
+    fun `T no path from the model leaks into either format`() {
+        // The sample's nodes carry an absolute path, so this can actually fail.
         val request = request()
+        assertTrue(
+            request.result.rootFrame!!.events.first().callSiteLocation != null,
+            "the fixture must carry a path for this to test anything",
+        )
         for (text in listOf(MarkdownExporter.export(request), MermaidExporter.export(request))) {
             assertFalse(text.contains("/Users/"), text)
+            assertFalse(text.contains("secret"), text)
             assertFalse(text.contains("C:\\"))
         }
+    }
+
+    @Test
+    fun `R a run in progress is not a flow anyone should export`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        b.addEvent(root, call("a"))
+        val running = b.snapshot(FlowResultStatus.RUNNING)
+
+        assertFalse(running.isTerminal, "the fixture must be mid-run for this to test anything")
+        // The exporters render whatever they are handed; refusing a partial map
+        // is the caller's job, and this is the property that decision rests on.
+        val partial = MarkdownExporter.export(ExportRequest(running, ExportContext()))
+        val finished = MarkdownExporter.export(
+            ExportRequest(b.snapshot(FlowResultStatus.COMPLETED), ExportContext()),
+        )
+        assertFalse(
+            partial == finished,
+            "a partial map and a finished one must not be indistinguishable",
+        )
     }
 
     @Test

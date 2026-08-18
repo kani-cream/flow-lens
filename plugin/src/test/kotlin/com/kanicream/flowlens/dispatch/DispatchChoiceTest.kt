@@ -110,11 +110,107 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
         assertFalse("two implementations is not a partial list", result.partial)
     }
 
-    fun `test C a candidate without a body is not offered`() {
-        // The interface method itself has no body and must not appear as an
-        // implementation of itself.
+    fun `test C a candidate with nothing to analyze is not offered`() {
+        ApplicationManager.getApplication().invokeAndWait {
+            myFixture.addFileToProject(
+                "demo/AbstractGateway.java",
+                """
+                package demo;
+                public abstract class AbstractGateway implements Gateway {
+                    public abstract void charge();
+                }
+                """.trimIndent(),
+            )
+        }
         val result = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
-        assertTrue(result.candidates.none { it.symbol.containerName == "Gateway" })
+        assertTrue(
+            "the interface method is not an implementation of itself",
+            result.candidates.none { it.symbol.containerName == "Gateway" },
+        )
+        assertTrue(
+            "an abstract override has no body to follow: ${result.candidates.map { it.symbol.containerName }}",
+            result.candidates.none { it.symbol.containerName == "AbstractGateway" },
+        )
+    }
+
+    fun `test B a call with no implementation in the project offers nothing`() {
+        ApplicationManager.getApplication().invokeAndWait {
+            myFixture.addFileToProject(
+                "demo/Lonely.java",
+                """
+                package demo;
+                public interface Lonely { void act(); }
+                """.trimIndent(),
+            )
+        }
+        val method = runReadActionBlocking {
+            val cls = myFixture.javaFacade.findClass("demo.Lonely")!!
+            PsiTreeUtil.findChildrenOfType(cls, PsiMethod::class.java).first { it.name == "act" }
+        }
+        val result = runReadActionBlocking { CandidateFinder.find(project, method) }
+        assertTrue("nothing implements it, so there is nothing to choose", result.isEmpty)
+        assertFalse(result.partial)
+    }
+
+    fun `test D more implementations than the cap gives a bounded, honest list`() {
+        ApplicationManager.getApplication().invokeAndWait {
+            repeat(CandidateFinder.MAX_CANDIDATES + 3) { index ->
+                myFixture.addFileToProject(
+                    "demo/Many$index.java",
+                    """
+                    package demo;
+                    public class Many$index implements Gateway {
+                        public void charge() { }
+                    }
+                    """.trimIndent(),
+                )
+            }
+        }
+        val result = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+        assertEquals(CandidateFinder.MAX_CANDIDATES, result.candidates.size)
+        assertTrue(
+            "a truncated list that did not say so would read as complete",
+            result.partial,
+        )
+    }
+
+    fun `test I a chosen continuation obeys the depth limit like any other`() {
+        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+            .candidates.first { it.symbol.containerName == "StripeGateway" }
+        choices.choose(DispatchChoice(interfaceKey(), "Gateway.charge()", candidate.entry))
+
+        // The chosen call sits one frame below the root, so at depth 1 it is
+        // exactly what the limit blocks.
+        ApplicationManager.getApplication().invokeAndWait {
+            myFixture.configureByText(
+                "Nested.java",
+                """
+                public class Nested {
+                    demo.Gateway gateway;
+                    void run() { indirect(); }
+                    void indirect() { gateway.charge(); }
+                }
+                """.trimIndent(),
+            )
+        }
+        val entry = "void run()"
+        val offset = myFixture.file.text.indexOf(entry) + entry.length - 2
+        val runId = service.startAnalysis(
+            myFixture.file.virtualFile,
+            offset,
+            FlowLimits(maxDepth = 1),
+        )
+        val result = runBlocking {
+            withTimeout(60_000) { service.results.first { it?.runId == runId && it.isTerminal }!! }
+        }
+        val indirect = result.rootFrame!!.events.single()
+        val chargeCall = result.frame(indirect.targetFrameId!!)!!.events.single()
+
+        assertNull("a choice does not buy extra depth", chargeCall.targetFrameId)
+        assertNull(
+            "and it does not claim to be showing a body it did not enter",
+            chargeCall.metadata[FlowMetadata.CHOSEN],
+        )
     }
 
     fun `test the call is a dead end before any choice`() {

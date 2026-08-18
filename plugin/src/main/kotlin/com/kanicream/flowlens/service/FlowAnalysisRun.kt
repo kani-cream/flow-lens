@@ -325,9 +325,16 @@ internal class FlowAnalysisRun(
         val isCycle = call.cycleKey != null && task.path.contains(call.cycleKey)
         val depthExceeded = call.recursable && !isCycle && task.depth + 1 > limits.maxDepth
         val spec = when {
-            isCycle -> call.spec.copy(kind = FlowNodeKind.CYCLE)
+            // Neither a cycle nor a depth-blocked call shows a body, so neither
+            // may claim a chosen continuation: "chosen: X" over nothing would say
+            // the reader is looking at X when they are not (`V0.4_SPEC.md` §4.5).
+            isCycle -> call.spec.copy(
+                kind = FlowNodeKind.CYCLE,
+                metadata = call.spec.metadata - FlowMetadata.CHOSEN,
+            )
             depthExceeded -> call.spec.copy(
-                metadata = call.spec.metadata + (FlowMetadata.LIMIT to FlowMetadata.LIMIT_DEPTH),
+                metadata = call.spec.metadata - FlowMetadata.CHOSEN +
+                    (FlowMetadata.LIMIT to FlowMetadata.LIMIT_DEPTH),
             )
             else -> call.spec
         }
