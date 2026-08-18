@@ -12,6 +12,7 @@ import com.kanicream.flowlens.workflow.FlowEntryRef
 import com.kanicream.flowlens.workflow.FlowLensFlows
 import com.kanicream.flowlens.workflow.FlowLensRecents
 import com.kanicream.flowlens.workflow.LaunchOutcome
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -61,11 +62,23 @@ class V03AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
         }
         val offset = myFixture.file.text.indexOf(entry) + entry.length - 2
         val runId = service.startAnalysis(myFixture.file.virtualFile, offset, limits)
-        return runBlocking {
+        val result = runBlocking {
             withTimeout(60_000) {
                 service.results.first { it?.runId == runId && it.isTerminal }!!
             }
         }
+        // The recent is written after the result is published, so a test that
+        // reads the list the instant the result arrives can miss it. Waiting for
+        // the write is what makes every recents assertion below deterministic.
+        val key = result.rootFrame?.symbol?.key
+        if (key != null && result.status == FlowResultStatus.COMPLETED) {
+            runBlocking {
+                withTimeout(10_000) {
+                    while (recents.recents().none { it.entry.key == key }) delay(10)
+                }
+            }
+        }
+        return result
     }
 
     private fun entryRef(result: FlowAnalysisResult): FlowEntryRef =
