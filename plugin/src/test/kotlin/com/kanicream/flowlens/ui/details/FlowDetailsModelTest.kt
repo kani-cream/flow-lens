@@ -116,4 +116,31 @@ class FlowDetailsModelTest : BasePlatformTestCase() {
             state.rows.any { it.label.startsWith("details.") || it.value.startsWith("enum.") },
         )
     }
+    fun `test a structure node is named by its kind rather than a missing symbol`() {
+        // A structure has no target symbol, so the panel falls back to the kind.
+        // Every kind must have a localized name or the panel would show a raw key.
+        for (kind in FlowNodeKind.entries) {
+            val state = FlowDetailsModel.stateOf(
+                FlowNode(
+                    id = NodeId(1),
+                    kind = kind,
+                    callSiteLocation = null,
+                    targetSymbol = null,
+                    targetLocation = null,
+                    targetFrameId = null,
+                    depth = 0,
+                    resolutionStatus = null,
+                    dispatchConfidence = null,
+                    executionMode = ExecutionMode.SYNC,
+                    orderingStatus = OrderingStatus.DETERMINISTIC,
+                ),
+            )
+            assertFalse(
+                "$kind falls back to a raw bundle key",
+                state.title.startsWith("enum.") || state.title.startsWith("!"),
+            )
+            assertNull(state.subtitle)
+            assertFalse("$kind offers navigation it cannot perform", state.openTargetEnabled)
+        }
+    }
 }
