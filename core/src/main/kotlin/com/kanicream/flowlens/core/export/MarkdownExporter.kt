@@ -97,6 +97,8 @@ object MarkdownExporter {
             when (node.executionMode) {
                 ExecutionMode.GOROUTINE -> add(s.goroutine)
                 ExecutionMode.DEFERRED -> add(s.deferred)
+                ExecutionMode.ASYNC -> add(s.async)
+                ExecutionMode.UNKNOWN -> add(s.timingUnknown)
                 else -> Unit
             }
             if (node.kind == FlowNodeKind.CYCLE) add(s.cycle)

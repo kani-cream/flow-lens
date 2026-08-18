@@ -99,13 +99,19 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
         key = "java:lambda@${SymbolQualifier.fileQualifier(lambda)}:${lambda.textOffset}",
     )
 
+    override fun isAnonymousBody(declaration: PsiElement): Boolean =
+        declaration is PsiLambdaExpression
+
     override fun hasAnalyzableBody(declaration: PsiElement): Boolean =
         declaration is PsiMethod && declaration.body != null
 
     override fun extractDirectFlow(callable: PsiElement): DirectFlowExtraction {
-        val method = callable as PsiMethod
         val extraction = Extractor()
-        method.body?.let(extraction::walk)
+        // A lambda body is an expression or a block; both walk the same way.
+        when (callable) {
+            is PsiLambdaExpression -> callable.body?.let(extraction::walk)
+            else -> (callable as PsiMethod).body?.let(extraction::walk)
+        }
         return DirectFlowExtraction(extraction.items(), extraction.controlFlowSimplified)
     }
 

@@ -458,9 +458,16 @@ object CanvasViewModelBuilder {
         else -> null
     }
 
+    /**
+     * When a body runs, at a glance. `UNKNOWN` is marked rather than left blank:
+     * silence would let the reader supply their own assumption, which is exactly
+     * the mistake the map exists to prevent (`V0.5_SPEC.md` §5.4).
+     */
     private fun executionGlyphOf(node: FlowNode): String? = when (node.executionMode) {
         ExecutionMode.GOROUTINE -> "⚡"
         ExecutionMode.DEFERRED -> "↩"
+        ExecutionMode.ASYNC -> "⇢"
+        ExecutionMode.UNKNOWN -> "⧖"
         else -> null
     }
 

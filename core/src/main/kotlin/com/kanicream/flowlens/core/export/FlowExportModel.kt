@@ -36,6 +36,9 @@ data class ExportStrings(
     val conditional: String = "may be skipped",
     val goroutine: String = "goroutine",
     val deferred: String = "deferred",
+    val async: String = "runs concurrently",
+    /** Said out loud, because an omission would read as "runs here". */
+    val timingUnknown: String = "timing not determined",
     val chosen: String = "chosen",
     val testSource: String = "test source",
     val nothing: String = "nothing",

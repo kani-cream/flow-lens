@@ -1,5 +1,13 @@
 package com.kanicream.flowlens.core.model
 
+/** Events with a body of their own, so a child frame may hang off them. */
+private val FRAME_OWNING_KINDS = setOf(
+    FlowNodeKind.CALL,
+    FlowNodeKind.CONSTRUCTOR,
+    FlowNodeKind.ENTRY,
+    FlowNodeKind.CALLBACK,
+)
+
 private val STRUCTURAL_KINDS = setOf(
     FlowNodeKind.CONDITION,
     FlowNodeKind.SWITCH,
@@ -50,7 +58,9 @@ data class FlowNode(
     init {
         require(depth >= 0) { "depth must be >= 0" }
         if (targetFrameId != null) {
-            require(kind == FlowNodeKind.CALL || kind == FlowNodeKind.CONSTRUCTOR || kind == FlowNodeKind.ENTRY) {
+            // A callback owns a frame for the same reason a call does: there is a
+            // body to enter. What differs is when it runs, not whether it has one.
+            require(kind in FRAME_OWNING_KINDS) {
                 "only callable events may own a target frame, got $kind"
             }
         }

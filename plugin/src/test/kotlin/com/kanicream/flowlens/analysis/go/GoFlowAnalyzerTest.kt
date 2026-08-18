@@ -120,7 +120,7 @@ class GoFlowAnalyzerTest : BasePlatformTestCase() {
         assertEquals(ExecutionMode.DEFERRED, extraction.calls[1].executionMode)
     }
 
-    fun `test function literal bodies are traversal boundaries`() {
+    fun `test a closure stored in a variable is not followed`() {
         val extraction = extractionOf(
             """
             package sample
@@ -133,7 +133,9 @@ class GoFlowAnalyzerTest : BasePlatformTestCase() {
             }
             """.trimIndent(),
         )
-        // helper() inside the literal must not appear; the f() invocation does.
+        // The literal is never handed to a call here, so there is no callback
+        // event: its invocation site is elsewhere, and finding it is reverse
+        // analysis (`V0.5_SPEC.md` §8). The f() invocation itself does appear.
         assertEquals(listOf("f"), callNames(extraction))
     }
 

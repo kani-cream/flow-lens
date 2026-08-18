@@ -55,6 +55,8 @@ object FlowExport {
             conditional = FlowLensBundle.message("details.conditional.hint"),
             goroutine = FlowLensBundle.message("enum.execution.GOROUTINE"),
             deferred = FlowLensBundle.message("enum.execution.DEFERRED"),
+            async = FlowLensBundle.message("export.async"),
+            timingUnknown = FlowLensBundle.message("export.timing.unknown"),
             chosen = FlowLensBundle.message("export.chosen"),
             testSource = FlowLensBundle.message("card.badge.test.source"),
             nothing = FlowLensBundle.message("branch.empty"),

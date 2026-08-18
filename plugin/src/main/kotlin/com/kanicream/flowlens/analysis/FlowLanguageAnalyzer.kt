@@ -165,6 +165,17 @@ interface FlowLanguageAnalyzer {
     /** True when [declaration] has an explicit body this analyzer can traverse. */
     fun hasAnalyzableBody(declaration: PsiElement): Boolean
 
+    /**
+     * True when [declaration] is a body written in place — a lambda, a closure —
+     * rather than a named declaration.
+     *
+     * Such a body can be analyzed as a frame, which is what v0.5 added, but it is
+     * not something a reader can name, store, or choose between: its identity is
+     * a position in a file, which does not survive an edit. So it is never
+     * offered as a dispatch candidate and never saved as a flow entry.
+     */
+    fun isAnonymousBody(declaration: PsiElement): Boolean = false
+
     /** Ordered explicit calls of the callable body. */
     fun extractDirectFlow(callable: PsiElement): DirectFlowExtraction
 

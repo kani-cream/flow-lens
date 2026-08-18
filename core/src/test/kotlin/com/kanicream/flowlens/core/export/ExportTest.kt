@@ -9,6 +9,8 @@ import com.kanicream.flowlens.core.model.FlowAnalysisResult
 import com.kanicream.flowlens.core.model.FlowLimits
 import com.kanicream.flowlens.core.model.FlowNodeKind
 import com.kanicream.flowlens.core.model.FlowResultStatus
+import com.kanicream.flowlens.core.model.ExecutionMode
+import com.kanicream.flowlens.core.model.OrderingStatus
 import com.kanicream.flowlens.core.model.FlowSymbol
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.core.model.RunId
@@ -73,6 +75,49 @@ class ExportTest {
 
     private fun request(result: FlowAnalysisResult = sample()) =
         ExportRequest(result, ExportContext())
+
+    /** A call that hands a body somewhere, and the body itself. */
+    private fun callbackFlow(mode: ExecutionMode): FlowAnalysisResult {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        val submit = b.addEvent(root, call("submit"))!!
+        val callback = b.addEvent(
+            root,
+            FlowEventSpec(
+                kind = FlowNodeKind.CALLBACK,
+                callSiteLocation = location(3),
+                targetSymbol = FlowSymbol("java", "{ } \u2192 submit()", null, "java:callback#submit"),
+                resolutionStatus = ResolutionStatus.PROJECT_LOCAL,
+                // A body written in place has no dispatch to be sure or unsure about.
+                dispatchConfidence = null,
+                executionMode = mode,
+                orderingStatus = OrderingStatus.UNSPECIFIED,
+            ),
+        )!!
+        val body = b.openChildFrame(root, callback, symbol("lambda"), null)
+        b.addEvent(body, call("charge"))
+        assertTrue(submit.value >= 0)
+        return b.snapshot(FlowResultStatus.COMPLETED)
+    }
+
+    @Test
+    fun `R an asynchronous body says so in words in both formats`() {
+        val request = request(callbackFlow(ExecutionMode.ASYNC))
+        val markdown = MarkdownExporter.export(request)
+        val mermaid = MermaidExporter.export(request)
+        assertTrue(markdown.contains("runs concurrently"), markdown)
+        assertTrue(mermaid.contains("runs concurrently"), mermaid)
+        assertTrue(markdown.contains("charge()"), "the body it was handed is exported too")
+    }
+
+    @Test
+    fun `R a body whose timing is undetermined says that rather than nothing`() {
+        // An omission would read as "runs here", which is the one thing it does
+        // not say (`V0.5_SPEC.md` §5.4).
+        val request = request(callbackFlow(ExecutionMode.UNKNOWN))
+        assertTrue(MarkdownExporter.export(request).contains("timing not determined"))
+        assertTrue(MermaidExporter.export(request).contains("timing not determined"))
+    }
 
     @Test
     fun `L exporting twice produces identical text`() {

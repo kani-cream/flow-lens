@@ -1,6 +1,7 @@
 package com.kanicream.flowlens.ui.status
 
 import com.kanicream.flowlens.FlowLensBundle
+import com.kanicream.flowlens.core.model.ExecutionMode
 import com.kanicream.flowlens.core.model.FlowAnalysisResult
 import com.kanicream.flowlens.core.model.FlowNode
 import com.kanicream.flowlens.core.model.FlowNodeKind
@@ -129,6 +130,11 @@ object FlowStatusModel {
             },
             reason("status.reason.cycle", nodes) { it.kind == FlowNodeKind.CYCLE },
             reason("status.reason.truncated", nodes) { it.kind == FlowNodeKind.LIMIT },
+            // Not a reason the map stops, but the same kind of disclosure: a body
+            // is on the map whose timing nothing justified (`V0.5_SPEC.md` §6).
+            reason("status.reason.callback.timing", nodes) {
+                it.kind == FlowNodeKind.CALLBACK && it.executionMode == ExecutionMode.UNKNOWN
+            },
         )
     }
 
