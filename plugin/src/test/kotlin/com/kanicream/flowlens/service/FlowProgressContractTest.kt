@@ -5,6 +5,7 @@ import com.intellij.testFramework.LightProjectDescriptor
 import com.intellij.testFramework.fixtures.LightJavaCodeInsightFixtureTestCase
 import com.kanicream.flowlens.core.model.FlowAnalysisResult
 import com.kanicream.flowlens.core.model.FlowLimits
+import com.kanicream.flowlens.core.model.RunId
 import com.kanicream.flowlens.core.model.FlowProgress
 import com.kanicream.flowlens.core.model.FlowResultStatus
 import com.kanicream.flowlens.testutil.RealJdkProjectDescriptor
@@ -50,24 +51,25 @@ class FlowProgressContractTest : LightJavaCodeInsightFixtureTestCase() {
         }
     }
 
-    private fun startFromRun(limits: FlowLimits = FlowLimits()) {
+    private fun startFromRun(limits: FlowLimits = FlowLimits()): RunId =
         service.startAnalysis(
             myFixture.file.virtualFile,
             myFixture.file.text.indexOf("void run()") + 6,
             limits,
         )
-    }
 
     fun `test observed snapshots never show deep frames before the root frame is complete`() = runBlocking {
         configureDeepSample()
-        val snapshots = CopyOnWriteArrayList<FlowAnalysisResult>()
+        val allSnapshots = CopyOnWriteArrayList<FlowAnalysisResult>()
         val collector = CoroutineScope(Dispatchers.Default).launch {
-            service.results.collect { it?.let(snapshots::add) }
+            service.results.collect { it?.let(allSnapshots::add) }
         }
-        startFromRun()
-        withTimeout(60_000) { service.results.first { it != null && it.isTerminal } }
+        val runId = startFromRun()
+        withTimeout(60_000) { service.results.first { it?.runId == runId && it.isTerminal } }
         collector.cancel()
 
+        // Snapshots from an earlier run are not this run's picture.
+        val snapshots = allSnapshots.filter { it.runId == runId }
         assertTrue(snapshots.isNotEmpty())
         for (snapshot in snapshots) {
             val root = snapshot.rootFrame ?: continue
@@ -83,14 +85,21 @@ class FlowProgressContractTest : LightJavaCodeInsightFixtureTestCase() {
 
     fun `test counters are monotonic and end in exactly one terminal stage`() = runBlocking {
         configureDeepSample()
-        val events = CopyOnWriteArrayList<FlowProgress>()
+        val allEvents = CopyOnWriteArrayList<FlowProgress>()
         val collector = CoroutineScope(Dispatchers.Default).launch {
-            service.progress.collect { it?.let(events::add) }
+            service.progress.collect { it?.let(allEvents::add) }
         }
-        startFromRun()
-        val terminal = withTimeout(60_000) { service.progress.first { it?.isTerminal == true }!! }
+        val runId = startFromRun()
+        val terminal = withTimeout(60_000) {
+            service.progress.first { it?.runId == runId && it.isTerminal }!!
+        }
         collector.cancel()
 
+        // The service keeps the last run's progress until a new analysis starts,
+        // and this collector is attached before that happens, so it sees the
+        // previous run's terminal event first. The contract under test is about
+        // this run's counters.
+        val events = allEvents.filter { it.runId == runId }
         assertTrue(events.isNotEmpty())
         assertEquals(
             "nodes produced must never decrease",
@@ -117,8 +126,8 @@ class FlowProgressContractTest : LightJavaCodeInsightFixtureTestCase() {
                 delay(40)
             }
         }
-        startFromRun()
-        withTimeout(60_000) { service.results.first { it != null && it.isTerminal } }
+        val runId = startFromRun()
+        withTimeout(60_000) { service.results.first { it?.runId == runId && it.isTerminal } }
         withTimeout(10_000) {
             while (seen.lastOrNull() != FlowResultStatus.COMPLETED) delay(20)
         }
@@ -128,8 +137,10 @@ class FlowProgressContractTest : LightJavaCodeInsightFixtureTestCase() {
 
     fun `test progress reports no work before the analysis produces any`() = runBlocking {
         configureDeepSample()
-        startFromRun()
-        val terminal = withTimeout(60_000) { service.progress.first { it?.isTerminal == true }!! }
+        val runId = startFromRun()
+        val terminal = withTimeout(60_000) {
+            service.progress.first { it?.runId == runId && it.isTerminal }!!
+        }
         assertTrue(terminal.nodesProduced > 0)
         assertTrue(terminal.framesAnalyzed > 0)
         assertEquals(
