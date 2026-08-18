@@ -8,6 +8,8 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CustomShortcutSet
 import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.actionSystem.ShortcutSet
 import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.util.SystemInfo
@@ -30,20 +32,35 @@ class FlowCanvasActions(private val canvas: FlowCanvas, parent: Disposable) {
 
     private val actions = listOf(
         canvasAction("flow.action.open.target", KeyEvent.VK_ENTER, 0) {
-            val card = canvas.selectedCard()
-            if (card != null) {
-                canvas.onNavigateToTarget(card)
-            } else {
-                canvas.selectedEntry()?.let(canvas.onNavigateToFrameEntry)
-            }
+            navigateToSelection(takeFocus = false)
         },
         canvasAction("flow.action.open.call.site", KeyEvent.VK_ENTER, InputEvent.SHIFT_DOWN_MASK) {
-            canvas.selectedCard()?.let(canvas.onNavigateToCallSite)
+            canvas.selectedCard()?.let { canvas.onNavigateToCallSite(it, false) }
         },
+        // The only command here that gives the keyboard away: reading the flow
+        // should not cost the ability to keep reading it. It borrows the
+        // platform's own Jump to Source binding rather than naming a key, so it
+        // is F4 on Windows and Linux, Cmd+Down on macOS where F4 belongs to the
+        // OS, and whatever the user rebound it to.
+        CanvasAction(
+            id = "flow.action.jump.to.source",
+            text = FlowLensBundle.message("flow.action.jump.to.source.text"),
+            description = FlowLensBundle.message("flow.action.jump.to.source.description"),
+            shortcuts = jumpToSourceShortcuts(),
+        ) { navigateToSelection(takeFocus = true) },
         canvasAction("flow.action.toggle.expansion", KeyEvent.VK_SPACE, 0) {
             canvas.selectedCard()?.let(canvas::toggleExpansion)
         },
     )
+
+    private fun navigateToSelection(takeFocus: Boolean) {
+        val card = canvas.selectedCard()
+        if (card != null) {
+            canvas.onNavigateToTarget(card, takeFocus)
+        } else {
+            canvas.selectedEntry()?.let { canvas.onNavigateToFrameEntry(it, takeFocus) }
+        }
+    }
 
     private val menuGroup = DefaultActionGroup().apply {
         actions.forEach(::add)
@@ -61,6 +78,25 @@ class FlowCanvasActions(private val canvas: FlowCanvas, parent: Disposable) {
         }
     }
 
+    /** The commands this component binds, in menu order. */
+    fun commands(): List<CanvasAction> =
+        menuGroup.childActionsOrStubs.filterIsInstance<CanvasAction>()
+
+    /** Runs a command by id, returning false when there is no such command. */
+    fun run(id: String): Boolean {
+        val command = commands().firstOrNull { it.id == id } ?: return false
+        command.performNow()
+        return true
+    }
+
+    /**
+     * What the IDE currently binds to Jump to Source, which differs by platform
+     * and by keymap. Falls back to F4 only if the platform action is missing.
+     */
+    private fun jumpToSourceShortcuts(): ShortcutSet =
+        ActionManager.getInstance().getAction(IdeActions.ACTION_EDIT_SOURCE)?.shortcutSet
+            ?: CustomShortcutSet(KeyStroke.getKeyStroke(KeyEvent.VK_F4, 0))
+
     /** Shows the actions the user can run on the canvas, each with its shortcut. */
     fun showContextMenu(at: Point) {
         ActionManager.getInstance()
@@ -75,9 +111,12 @@ class FlowCanvasActions(private val canvas: FlowCanvas, parent: Disposable) {
         modifiers: Int,
         perform: () -> Unit,
     ): CanvasAction = CanvasAction(
+        id = textKey,
         text = FlowLensBundle.message("${textKey}.text"),
         description = FlowLensBundle.message("${textKey}.description"),
-        shortcut = keyCode?.let { KeyStroke.getKeyStroke(it, modifiers) },
+        shortcuts = keyCode
+            ?.let { CustomShortcutSet(KeyStroke.getKeyStroke(it, modifiers)) }
+            ?: CustomShortcutSet.EMPTY,
         perform = perform,
     )
 
@@ -89,16 +128,19 @@ class FlowCanvasActions(private val canvas: FlowCanvas, parent: Disposable) {
     private fun menuMask(): Int =
         if (SystemInfo.isMac) InputEvent.META_DOWN_MASK else InputEvent.CTRL_DOWN_MASK
 
-    private class CanvasAction(
+    class CanvasAction(
+        val id: String,
         text: String,
         description: String,
-        private val shortcut: KeyStroke?,
+        val shortcuts: ShortcutSet,
         private val perform: () -> Unit,
     ) : AnAction(text, description, null), DumbAware {
 
+        fun performNow() = perform()
+
         fun register(component: javax.swing.JComponent, parent: Disposable) {
-            val stroke = shortcut ?: return
-            registerCustomShortcutSet(CustomShortcutSet(stroke), component, parent)
+            if (shortcuts.shortcuts.isEmpty()) return
+            registerCustomShortcutSet(shortcuts, component, parent)
         }
 
         override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT

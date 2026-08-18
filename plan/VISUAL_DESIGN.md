@@ -120,7 +120,7 @@ Requirements:
 - visually prominent.
 - clearly identified as root.
 - language/context available without excessive detail.
-- double click / Enter opens entry declaration.
+- double click / Enter shows the entry declaration, keeping the keyboard on the canvas (§18).
 
 ---
 
@@ -596,6 +596,31 @@ Default:
 - entry → entry declaration.
 
 Keyboard navigation must support core actions.
+
+### Who owns the keyboard
+
+Showing code and going to code are different intents, and Flow Lens defaults to
+the first. Reading a flow is a sequence of moves: the reader is following an
+order of execution and wants the declaration on screen, not a cursor in it. A
+navigation that took the keyboard would end the sequence after every single
+step, and getting back would need the mouse.
+
+- Enter, ⇧Enter, and double click **show** the code. The editor scrolls and the
+  caret moves, but the keyboard stays on the canvas, so the next arrow key keeps
+  reading the flow.
+- **Jump to Source** is the one command that hands the keyboard to the editor,
+  for when the reader is done tracing and wants to edit. It borrows the
+  platform's own binding rather than naming a key, so it follows the keymap: F4
+  on Windows and Linux, ⌘↓ on macOS where F4 belongs to the OS, and whatever the
+  user rebound it to. The hint line asks the IDE what that binding currently is
+  instead of printing a fixed key.
+
+Because a KeyListener runs before registered shortcuts, the canvas acts on
+arrows only when they carry no modifier; a modified arrow belongs to whoever
+bound it.
+
+The same rule covers the details panel buttons: nothing in Flow Lens takes the
+keyboard away except the command whose whole purpose is to do so.
 
 ---
 

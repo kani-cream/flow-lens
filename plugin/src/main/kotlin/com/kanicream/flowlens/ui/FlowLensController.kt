@@ -37,8 +37,12 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
     val canvas = FlowCanvas()
     val statusView = FlowStatusView(onReanalyze = ::reanalyze)
     val detailsPanel = FlowDetailsPanel(
-        onOpenTarget = { navigateTo(selectionModel.selected?.node?.preferredNavigationLocation) },
-        onOpenCallSite = { navigateTo(selectionModel.selected?.node?.callSiteLocation) },
+        onOpenTarget = {
+            navigateTo(selectionModel.selected?.node?.preferredNavigationLocation, takeFocus = false)
+        },
+        onOpenCallSite = {
+            navigateTo(selectionModel.selected?.node?.callSiteLocation, takeFocus = false)
+        },
     )
 
     /** Notified when view-only state such as zoom changes, so chrome can refresh. */
@@ -52,9 +56,15 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
     init {
         canvas.onContextMenu = canvasActions::showContextMenu
         canvas.onSelectionChanged = selectionModel::select
-        canvas.onNavigateToTarget = { card -> navigateTo(card.node.preferredNavigationLocation) }
-        canvas.onNavigateToCallSite = { card -> navigateTo(card.node.callSiteLocation) }
-        canvas.onNavigateToFrameEntry = { frame: FrameVM -> navigateTo(frame.entryLocation) }
+        canvas.onNavigateToTarget = { card, takeFocus ->
+            navigateTo(card.node.preferredNavigationLocation, takeFocus)
+        }
+        canvas.onNavigateToCallSite = { card, takeFocus ->
+            navigateTo(card.node.callSiteLocation, takeFocus)
+        }
+        canvas.onNavigateToFrameEntry = { frame: FrameVM, takeFocus ->
+            navigateTo(frame.entryLocation, takeFocus)
+        }
         // Selecting the entry clears the call details: the entry is a frame, not
         // a call event, so there is no call-site or dispatch state to describe.
         canvas.onEntrySelected = { selectionModel.select(null) }
@@ -132,7 +142,14 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
 
     // ---- navigation ----
 
-    private fun navigateTo(location: FlowLocation?) {
+    /**
+     * Shows [location] in the editor. [takeFocus] is false while the user is
+     * reading the flow: the caret moves so the declaration is on screen, but the
+     * keyboard stays on the canvas so the next arrow key continues the trace
+     * instead of typing into the file. Only an explicit Jump to Source hands the
+     * keyboard over.
+     */
+    private fun navigateTo(location: FlowLocation?, takeFocus: Boolean) {
         if (location == null) return
         val runId = currentRunId ?: return
         val pointer = service.navigationPointer(runId, location.handle) ?: return
@@ -144,7 +161,7 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
             if (element == null || file == null) null
             else OpenFileDescriptor(project, file, element.textOffset)
         } ?: return
-        descriptor.navigate(true)
+        descriptor.navigate(takeFocus)
     }
 
     override fun dispose() {
