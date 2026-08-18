@@ -9,9 +9,9 @@ package main
 // Expected shape on the canvas:
 //
 //	acquire()
-//	↩ { } → func()               I: deferred — it runs when serveRequest() returns,
+//	↩ { }                        I: deferred — it runs when serveRequest() returns,
 //	    release()                    not here, so the connector is dashed
-//	⚡ { } → func()               H: goroutine — it may run at any time
+//	⚡ { }                        H: goroutine — it may run at any time
 //	    charge()                     and its body is visible all the same
 //	handOff()
 //	⧖ { } → handOff()            not a keyword and not a documented API, so
@@ -25,6 +25,8 @@ package main
 //  2. respond() must have a solid connector: it is what runs next.
 //  3. The deferred card must not look like an ordinary immediate call. A defer
 //     that reads as "runs here" is worse than no card at all.
+//  4. Each closure is ONE card. The call and the body are the same thing here,
+//     so a second card claiming an unresolved call would be inventing one.
 //
 // Then analyze kept(): the closure is assigned to a variable and never handed
 // to a call, so there is no callback card (KNOWN_LIMITATIONS.md §42).

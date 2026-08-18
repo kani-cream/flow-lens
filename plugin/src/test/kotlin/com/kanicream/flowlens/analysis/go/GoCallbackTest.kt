@@ -46,7 +46,7 @@ class GoCallbackTest : BasePlatformTestCase() {
     private fun shape(items: List<FlowItem>): List<String> = items.map {
         when (it) {
             is ExtractedCall -> it.calleeShortName
-            is ExtractedCallback -> "callback:${it.receiverShortName}:${it.executionMode}"
+            is ExtractedCallback -> "callback:${it.receiverShortName ?: "in-place"}:${it.executionMode}"
             else -> it.javaClass.simpleName
         }
     }
@@ -60,7 +60,7 @@ class GoCallbackTest : BasePlatformTestCase() {
 
     fun `test H the goroutine body is not walked where it is written`() {
         val items = itemsOf("go func() { charge() }()\naudit()")
-        assertEquals(listOf("callback:func():GOROUTINE", "audit"), shape(items).takeLast(2))
+        assertEquals(listOf("callback:in-place:GOROUTINE", "audit"), shape(items))
         assertFalse("charge() belongs to the closure's own frame", shape(items).contains("charge"))
     }
 
@@ -91,6 +91,22 @@ class GoCallbackTest : BasePlatformTestCase() {
         val callback = items.filterIsInstance<ExtractedCallback>().single()
         assertEquals(ExecutionMode.SYNC, callback.executionMode)
         assertEquals(OrderingStatus.DETERMINISTIC, callback.orderingStatus)
+    }
+
+    fun `test an invoked literal is one event, not a call plus its body`() {
+        // Regression: the call and the body are the same thing here, and there is
+        // no declaration to resolve — so the extra call card could only ever
+        // report itself as unresolved, beside a callback card that had the body.
+        assertEquals(listOf("callback:in-place:GOROUTINE"), shape(itemsOf("go func() { charge() }()")))
+        assertEquals(listOf("callback:in-place:DEFERRED"), shape(itemsOf("defer func() { cleanup() }()")))
+        assertEquals(listOf("callback:in-place:SYNC"), shape(itemsOf("func() { charge() }()")))
+    }
+
+    fun `test a literal handed to a call is still named after that call`() {
+        assertEquals(
+            listOf("helper", "callback:helper:UNKNOWN"),
+            shape(itemsOf("helper(func() { charge() })")),
+        )
     }
 
     fun `test N a closure stored in a variable is not invented as a callback`() {

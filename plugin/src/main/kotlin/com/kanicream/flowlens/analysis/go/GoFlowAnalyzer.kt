@@ -199,15 +199,21 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                 is GoCallExpr -> {
                     element.expression?.let(::walk)
                     element.argumentList.expressionList.forEach(::walk)
-                    callsExtracted += 1
                     val mode = executionModeOf(element)
-                    sink += ExtractedCall(
-                        callSite = element,
-                        kind = FlowNodeKind.CALL,
-                        calleeShortName = calleeNameOf(element),
-                        executionMode = mode,
-                        conditional = conditionalDepth > 0,
-                    )
+                    // `go func() { … }()` invokes a body written right here. The
+                    // call and the body are one thing, and there is no declaration
+                    // to resolve, so emitting a call as well produced a second
+                    // card that could only ever report itself as unresolved.
+                    if (element.expression !is GoFunctionLit) {
+                        callsExtracted += 1
+                        sink += ExtractedCall(
+                            callSite = element,
+                            kind = FlowNodeKind.CALL,
+                            calleeShortName = calleeNameOf(element),
+                            executionMode = mode,
+                            conditional = conditionalDepth > 0,
+                        )
+                    }
                     addCallbacks(element, mode)
                 }
                 is GoIfStatement -> walkIf(element)
@@ -262,8 +268,9 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
          * to look up: the call's own execution mode is the body's.
          */
         private fun addCallbacks(call: GoCallExpr, mode: ExecutionMode) {
+            val invokedInPlace = call.expression as? GoFunctionLit
             val literals = buildList {
-                (call.expression as? GoFunctionLit)?.let(::add)
+                invokedInPlace?.let(::add)
                 addAll(call.argumentList.expressionList.filterIsInstance<GoFunctionLit>())
             }
             if (literals.isEmpty()) return
@@ -271,7 +278,7 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                 ExecutionMode.GOROUTINE -> CallbackTiming.GOROUTINE
                 ExecutionMode.DEFERRED -> CallbackTiming.DEFERRED
                 // An immediately invoked literal runs right here.
-                else -> if (call.expression is GoFunctionLit) {
+                else -> if (invokedInPlace != null) {
                     CallbackTiming.IN_PLACE
                 } else {
                     CallbackTiming.UNDETERMINED
@@ -280,7 +287,13 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
             for (literal in literals) {
                 sink += ExtractedCallback(
                     body = literal,
-                    receiverShortName = calleeNameOf(call),
+                    // A body invoked where it is written was handed to nobody,
+                    // so there is no receiver to name it after.
+                    receiverShortName = if (literal === invokedInPlace) {
+                        null
+                    } else {
+                        calleeNameOf(call)
+                    },
                     executionMode = timing.executionMode,
                     orderingStatus = timing.orderingStatus,
                     conditional = conditionalDepth > 0,
@@ -418,9 +431,8 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
 
         private fun calleeNameOf(call: GoCallExpr): String = when (val callee = call.expression) {
             is GoReferenceExpression -> callee.identifier.text
-            // An immediately invoked literal has no name, and its whole source
-            // text is not one: `func()` says what was called.
-            is GoFunctionLit -> "func()"
+            // A literal has no name, and its whole source text is not one.
+            is GoFunctionLit -> "func"
             else -> callee.text
         }
 

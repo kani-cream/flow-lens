@@ -65,8 +65,11 @@ class ExtractedTerminator(
  */
 class ExtractedCallback(
     val body: PsiElement,
-    /** The call that received it, for naming: "callback of submit()". */
-    val receiverShortName: String,
+    /**
+     * The call that received it, for naming: "callback of submit()". Null when
+     * the body is invoked where it is written and was handed to nobody.
+     */
+    val receiverShortName: String?,
     val executionMode: ExecutionMode,
     val orderingStatus: OrderingStatus,
     /** True when the enclosing call itself may not execute. */

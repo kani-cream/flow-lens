@@ -322,13 +322,17 @@ internal class FlowAnalysisRun(
         return true
     }
 
-    /** Names a callback by the call it was handed to, so two are distinguishable. */
-    private fun callbackSymbol(languageId: String, receiver: String): FlowSymbol =
+    /**
+     * Names a callback by the call it was handed to, so two of them are
+     * distinguishable. A body invoked where it is written has no such call, and
+     * naming it after itself would say less than the braces already do.
+     */
+    private fun callbackSymbol(languageId: String, receiver: String?): FlowSymbol =
         FlowSymbol(
             languageId = languageId,
-            displayName = "{ } → $receiver()",
+            displayName = receiver?.let { "{ } → $it()" } ?: "{ }",
             containerName = null,
-            key = "$languageId:callback#$receiver",
+            key = "$languageId:callback#${receiver ?: "in-place"}",
         )
 
     private fun appendTerminator(
