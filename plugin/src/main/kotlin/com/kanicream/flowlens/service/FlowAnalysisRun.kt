@@ -287,7 +287,7 @@ internal class FlowAnalysisRun(
     ): Boolean {
         val handle = builder.openStructure(
             task.frameId,
-            StructureSpec(structure.kind, structure.location, structure.summary),
+            StructureSpec(structure.kind, structure.location, structure.summary, structure.metadata),
         )
         nodesProduced = builder.nodeCount
         if (handle == null) {

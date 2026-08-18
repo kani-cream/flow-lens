@@ -632,7 +632,8 @@ Detailed semantics are in `plan/V0.1_SPEC.md`.
 - Java/Kotlin `switch`/`when`.
 - Go `switch` and selected `select` representation where appropriate.
 - loops.
-- return/throw/panic-related termination.
+- return/throw termination. Go `panic` stays an ordinary call in v0.2
+  (`V0.2_SPEC.md` §2); terminator treatment for it is deferred.
 - JVM try/catch/finally.
 - branch merge visualization.
 - loop containers.

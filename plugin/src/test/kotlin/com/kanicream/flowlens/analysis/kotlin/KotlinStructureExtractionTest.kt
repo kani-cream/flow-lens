@@ -145,6 +145,21 @@ class KotlinStructureExtractionTest : LightJavaCodeInsightFixtureTestCase() {
         assertTrue("what is not represented stays disclosed", extraction.controlFlowSimplified)
     }
 
+    fun `test a safe call that skips no call discloses nothing`() {
+        val file = myFixture.configureByText(
+            "safe.kt",
+            """
+            fun run(s: String?) { val n = s?.length }
+            """.trimIndent(),
+        )
+        val function = PsiTreeUtil.findChildrenOfType(file, KtNamedFunction::class.java)
+            .first { it.name == "run" }
+        assertFalse(
+            "`s?.length` reads a property; no call is being skipped",
+            analyzer.extractDirectFlow(function).controlFlowSimplified,
+        )
+    }
+
     fun `test P represented control flow is no longer reported as simplified`() {
         val file = myFixture.configureByText(
             "clean.kt",

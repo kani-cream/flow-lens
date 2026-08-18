@@ -27,6 +27,8 @@ class StructureSpec(
     val kind: FlowNodeKind,
     val callSiteLocation: FlowLocation?,
     val summary: String?,
+    /** Technical markers such as "this loop body runs at least once". Never source text. */
+    val metadata: Map<String, String> = emptyMap(),
 )
 
 /** Input for one ordinary semantic event. Depth is derived from the owning frame. */
@@ -188,6 +190,7 @@ class FlowModelBuilder(
             orderingStatus = OrderingStatus.DETERMINISTIC,
             branches = structure.branches(),
             structureSummary = structure.spec.summary,
+            metadata = structure.spec.metadata,
         )
         emit(structure.frameId, node)
     }

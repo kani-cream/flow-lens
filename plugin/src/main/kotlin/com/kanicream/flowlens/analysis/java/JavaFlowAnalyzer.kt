@@ -6,6 +6,9 @@ import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiComment
 import com.intellij.psi.PsiConditionalExpression
 import com.intellij.psi.PsiBreakStatement
+import com.intellij.psi.PsiWhiteSpace
+import com.intellij.psi.PsiYieldStatement
+import com.intellij.psi.PsiSwitchStatement
 import com.intellij.psi.PsiContinueStatement
 import com.intellij.psi.PsiDoWhileStatement
 import com.intellij.psi.PsiForStatement
@@ -198,6 +201,13 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
         /** > 0 while walking a short-circuit operand, which has no structure. */
         private var conditionalDepth = 0
 
+        /**
+         * Calls extracted so far. The disclosure in §6 is about flow the map does
+         * not show, so a construct only earns it when a call actually sits in the
+         * part that is not represented: `a != null && b > 0` hides nothing.
+         */
+        private var callsExtracted = 0
+
         fun items(): List<FlowItem> = root.toList()
 
         fun walk(element: PsiElement) {
@@ -238,11 +248,15 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
                     element.exception?.let(::walk)
                     sink += ExtractedTerminator(FlowNodeKind.THROW, element)
                 }
-                is PsiBreakStatement, is PsiContinueStatement -> {
-                    // Jumps are not drawn as edges in v0.2, so the result stays
-                    // disclosed as simplified (`V0.2_SPEC.md` §6).
-                    controlFlowSimplified = true
+                is PsiBreakStatement -> {
+                    // A `break` that ends a switch case is already expressed by the
+                    // case boundary. Only a jump the map does not show — out of a
+                    // loop, or to a label — earns the disclosure (`V0.2_SPEC.md` §6).
+                    if (element.findExitedStatement() !is PsiSwitchStatement) {
+                        controlFlowSimplified = true
+                    }
                 }
+                is PsiContinueStatement -> controlFlowSimplified = true
                 is PsiPolyadicExpression -> walkPolyadic(element)
                 else -> element.children.forEach(::walk)
             }
@@ -278,16 +292,12 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
 
         private fun walkSwitch(element: PsiSwitchBlock) {
             element.expression?.let(::walk)
-            val branches = mutableListOf<ExtractedBranch>()
+            val groups = mutableListOf<Pair<PsiSwitchLabelStatementBase?, List<PsiElement>>>()
             var current: MutableList<PsiElement>? = null
             var currentLabel: PsiSwitchLabelStatementBase? = null
             fun flush() {
                 val statements = current ?: return
-                val label = currentLabel
-                branches += branch(
-                    if (label?.isDefaultCase == true) BranchKind.DEFAULT else BranchKind.CASE,
-                    labelTextOf(label),
-                ) { statements.forEach(::walk) }
+                groups += currentLabel to statements.toList()
             }
             for (child in element.body?.children.orEmpty()) {
                 when (child) {
@@ -303,12 +313,35 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
                 }
             }
             flush()
+
+            // A case that neither ends nor is empty runs on into the next one, and
+            // v0.2 draws the cases as independent sections (`V0.2_SPEC.md` §6).
+            if (groups.dropLast(1).any { (_, statements) -> fallsThrough(statements) }) {
+                controlFlowSimplified = true
+            }
+
+            val branches = groups.map { (label, statements) ->
+                branch(
+                    if (label?.isDefaultCase == true) BranchKind.DEFAULT else BranchKind.CASE,
+                    labelTextOf(label),
+                ) { statements.forEach(::walk) }
+            }
             sink += ExtractedStructure(
                 kind = FlowNodeKind.SWITCH,
                 anchor = element,
                 summary = SourceSummary.of(element.expression?.text),
                 branches = branches,
             )
+        }
+
+        /** Whether [statements] reach the end of their case instead of leaving it. */
+        private fun fallsThrough(statements: List<PsiElement>): Boolean {
+            val last = statements.lastOrNull { it !is PsiComment && it !is PsiWhiteSpace } ?: return false
+            return last !is PsiBreakStatement &&
+                last !is PsiContinueStatement &&
+                last !is PsiReturnStatement &&
+                last !is PsiThrowStatement &&
+                last !is PsiYieldStatement
         }
 
         private fun walkLoop(element: PsiLoopStatement) {
@@ -381,15 +414,16 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
             }
             // An operand that may never be evaluated is marked rather than given
             // a structure of its own (`V0.2_SPEC.md` §2).
-            controlFlowSimplified = true
             val operands = element.operands
             operands.firstOrNull()?.let(::walk)
+            val before = callsExtracted
             conditionalDepth += 1
             try {
                 operands.drop(1).forEach(::walk)
             } finally {
                 conditionalDepth -= 1
             }
+            if (callsExtracted > before) controlFlowSimplified = true
         }
 
         private fun labelTextOf(label: PsiSwitchLabelStatementBase?): String? {
@@ -424,6 +458,7 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
         }
 
         private fun addCall(callSite: PsiElement, kind: FlowNodeKind, shortName: String) {
+            callsExtracted += 1
             sink += ExtractedCall(
                 callSite = callSite,
                 kind = kind,

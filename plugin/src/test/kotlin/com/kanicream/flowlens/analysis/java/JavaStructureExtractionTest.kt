@@ -31,6 +31,7 @@ class JavaStructureExtractionTest : LightJavaCodeInsightFixtureTestCase() {
             public class Sample {
                 void run(boolean flag, java.util.List<String> items) { $body }
                 boolean cond() { return true; }
+                java.util.List<String> all() { return items; }
                 int subject() { return 1; }
                 int one() { return 1; }
                 void a() { } void b() { } void c() { } void d() { }
@@ -93,8 +94,12 @@ class JavaStructureExtractionTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     fun `test F a for-each evaluates its iterable once before the loop`() {
-        val items = itemsOf("for (String s : items) { a(); }")
-        assertEquals(listOf("LOOP"), shape(items))
+        val items = itemsOf("for (String s : all()) { a(); }")
+        assertEquals(
+            "the iterable is evaluated once, so it is not inside the container",
+            listOf("all", "LOOP"),
+            shape(items),
+        )
         assertEquals(listOf("BODY=[a]"), structure(items).branches.map(::branchShape))
     }
 
@@ -187,6 +192,77 @@ class JavaStructureExtractionTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(BranchKind.CASE, branches[0].kind)
         assertTrue("a case that does nothing is still a case", branches[0].items.isEmpty())
         assertFalse(branches[1].items.isEmpty())
+    }
+
+    fun `test a switch whose cases all break discloses nothing`() {
+        // The spec's own case C example. The `break` is the case boundary, which
+        // the map draws, so it is not unrepresented flow (`V0.2_SPEC.md` §6).
+        val file = myFixture.configureByText(
+            "Cases.java",
+            """
+            public class Cases {
+                void run(int k) {
+                    switch (k) { case 1: a(); break; default: b(); }
+                }
+                void a() { } void b() { }
+            }
+            """.trimIndent(),
+        )
+        val method = PsiTreeUtil.findChildrenOfType(file, PsiMethod::class.java).first { it.name == "run" }
+        assertFalse(analyzer.extractDirectFlow(method).controlFlowSimplified)
+    }
+
+    fun `test a case that falls through is disclosed`() {
+        val file = myFixture.configureByText(
+            "Fall.java",
+            """
+            public class Fall {
+                void run(int k) {
+                    switch (k) { case 1: a(); case 2: b(); break; }
+                }
+                void a() { } void b() { }
+            }
+            """.trimIndent(),
+        )
+        val method = PsiTreeUtil.findChildrenOfType(file, PsiMethod::class.java).first { it.name == "run" }
+        assertTrue(
+            "case 1 runs on into case 2, and the sections do not say so",
+            analyzer.extractDirectFlow(method).controlFlowSimplified,
+        )
+    }
+
+    fun `test an empty case falling into the next one is not a disclosure`() {
+        // `case 1: case 2: a();` is one grouped label, not hidden flow.
+        val file = myFixture.configureByText(
+            "Grouped.java",
+            """
+            public class Grouped {
+                void run(int k) {
+                    switch (k) { case 1: case 2: a(); break; }
+                }
+                void a() { }
+            }
+            """.trimIndent(),
+        )
+        val method = PsiTreeUtil.findChildrenOfType(file, PsiMethod::class.java).first { it.name == "run" }
+        assertFalse(analyzer.extractDirectFlow(method).controlFlowSimplified)
+    }
+
+    fun `test a condition without a call discloses nothing`() {
+        val file = myFixture.configureByText(
+            "Plain.java",
+            """
+            public class Plain {
+                void run(String s, int n) { if (s != null && n > 0) { a(); } }
+                void a() { }
+            }
+            """.trimIndent(),
+        )
+        val method = PsiTreeUtil.findChildrenOfType(file, PsiMethod::class.java).first { it.name == "run" }
+        assertFalse(
+            "a short circuit that skips no call hides nothing",
+            analyzer.extractDirectFlow(method).controlFlowSimplified,
+        )
     }
 
     fun `test a break keeps the result disclosed as simplified`() {

@@ -152,6 +152,13 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
         /** > 0 while walking a short-circuit operand, which has no structure. */
         private var conditionalDepth = 0
 
+        /**
+         * Calls extracted so far. The §6 disclosure is about flow the map does not
+         * show, so a construct earns it only when a call actually sits in the part
+         * that is not represented: `a != null && b > 0` hides nothing.
+         */
+        private var callsExtracted = 0
+
         fun items(): List<FlowItem> = root.toList()
 
         fun walk(element: PsiElement) {
@@ -162,6 +169,7 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                 is GoCallExpr -> {
                     element.expression?.let(::walk)
                     element.argumentList.expressionList.forEach(::walk)
+                    callsExtracted += 1
                     sink += ExtractedCall(
                         callSite = element,
                         kind = FlowNodeKind.CALL,
@@ -178,12 +186,25 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                     element.expressionList.forEach(::walk)
                     sink += ExtractedTerminator(FlowNodeKind.RETURN, element)
                 }
-                is GoBreakStatement, is GoContinueStatement -> controlFlowSimplified = true
+                is GoBreakStatement -> {
+                    // A `break` that leaves a switch or select case is already
+                    // expressed by the case boundary; only a jump out of a loop is
+                    // flow the map does not show (`V0.2_SPEC.md` §6).
+                    val target = PsiTreeUtil.getParentOfType(
+                        element,
+                        GoForStatement::class.java,
+                        GoSwitchStatement::class.java,
+                        GoSelectStatement::class.java,
+                    )
+                    if (target is GoForStatement) controlFlowSimplified = true
+                }
+                is GoContinueStatement -> controlFlowSimplified = true
                 is GoAndExpr, is GoOrExpr -> {
-                    controlFlowSimplified = true
                     val binary = element as GoBinaryExpr
                     binary.left?.let(::walk)
+                    val before = callsExtracted
                     conditional { binary.right?.let(::walk) }
+                    if (callsExtracted > before) controlFlowSimplified = true
                 }
                 else -> element.children.forEach(::walk)
             }

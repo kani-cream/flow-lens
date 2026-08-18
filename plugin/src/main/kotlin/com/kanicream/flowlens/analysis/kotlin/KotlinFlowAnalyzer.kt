@@ -251,6 +251,13 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
         /** > 0 while walking an operand that short-circuits and has no structure. */
         private var conditionalDepth = 0
 
+        /**
+         * Calls extracted so far. The §6 disclosure is about flow the map does not
+         * show, so a construct earns it only when a call actually sits in the part
+         * that is not represented: `a != null && b > 0` hides nothing.
+         */
+        private var callsExtracted = 0
+
         fun items(): List<FlowItem> = root.toList()
 
         fun walk(element: PsiElement) {
@@ -262,6 +269,7 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                     element.valueArguments.forEach { arg ->
                         arg.getArgumentExpression()?.let(::walk)
                     }
+                    callsExtracted += 1
                     sink += ExtractedCall(
                         callSite = element,
                         kind = FlowNodeKind.CALL,
@@ -286,10 +294,12 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                 is KtBreakExpression, is KtContinueExpression -> controlFlowSimplified = true
                 is KtSafeQualifiedExpression -> {
                     // `a?.f()` runs f only when the receiver is not null; v0.2
-                    // marks it rather than giving it a structure.
-                    controlFlowSimplified = true
+                    // marks it rather than giving it a structure. `a?.name` skips
+                    // no call, so it discloses nothing.
                     walk(element.receiverExpression)
+                    val before = callsExtracted
                     conditional { element.selectorExpression?.let(::walk) }
+                    if (callsExtracted > before) controlFlowSimplified = true
                 }
                 is KtBinaryExpression -> walkBinary(element)
                 else -> element.children.forEach(::walk)
@@ -394,9 +404,10 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                 element.children.forEach(::walk)
                 return
             }
-            controlFlowSimplified = true
             element.left?.let(::walk)
+            val before = callsExtracted
             conditional { element.right?.let(::walk) }
+            if (callsExtracted > before) controlFlowSimplified = true
         }
 
         private fun loopHeaderOf(element: KtLoopExpression): String? = when (element) {

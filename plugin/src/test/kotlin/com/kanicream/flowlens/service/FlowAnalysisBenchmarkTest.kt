@@ -6,6 +6,7 @@ import com.intellij.testFramework.fixtures.LightJavaCodeInsightFixtureTestCase
 import com.kanicream.flowlens.core.model.FlowLimits
 import com.kanicream.flowlens.core.model.FlowResultStatus
 import com.kanicream.flowlens.testutil.RealJdkProjectDescriptor
+import com.kanicream.flowlens.ui.canvas.CanvasMetrics
 import com.kanicream.flowlens.ui.canvas.CanvasViewModelBuilder
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -108,6 +109,60 @@ class FlowAnalysisBenchmarkTest : LightJavaCodeInsightFixtureTestCase() {
             "bounded operations should scale with frames, not with nodes",
             operations.get() <= terminal.frames.size + 2,
         )
+    }
+
+    /**
+     * A structure-heavy body: nested loops and conditions rather than a wide call
+     * tree. Layout recurses through sections here, which the call-tree corpus does
+     * not exercise (`V0.2_RESULTS.md` §8).
+     */
+    private fun generateNestedStructures(depth: Int, callsPerLevel: Int) {
+        val body = buildString {
+            append("public class Nested {\n    void run(java.util.List<String> items, boolean flag) {\n")
+            for (level in 0 until depth) {
+                val indent = "        " + "    ".repeat(level)
+                append("$indent for (String s$level : items) {\n")
+                append("$indent     if (flag) {\n")
+                repeat(callsPerLevel) { append("$indent         work(); \n") }
+                append("$indent     } else {\n")
+                repeat(callsPerLevel) { append("$indent         other(); \n") }
+                append("$indent     }\n")
+            }
+            repeat(depth) { level -> append("        " + "    ".repeat(depth - level - 1) + " }\n") }
+            append("    }\n    void work() { }\n    void other() { }\n}\n")
+        }
+        ApplicationManager.getApplication().invokeAndWait {
+            myFixture.configureByText("Nested.java", body)
+        }
+    }
+
+    fun `test a structure-heavy body lays out without a cost blowup`() = runBlocking {
+        generateNestedStructures(depth = 6, callsPerLevel = 4)
+
+        val start = System.nanoTime()
+        service.startAnalysis(
+            myFixture.file.virtualFile,
+            myFixture.file.text.indexOf("void run(") + 6,
+            FlowLimits(),
+        )
+        val terminal = withTimeout(120_000) { service.results.first { it != null && it.isTerminal }!! }
+        val analysisMs = (System.nanoTime() - start) / 1_000_000
+
+        val layoutStart = System.nanoTime()
+        val vm = CanvasViewModelBuilder.build(terminal, emptySet())
+        val layoutMs = (System.nanoTime() - layoutStart) / 1_000_000
+        val cards = CanvasViewModelBuilder.visibleCards(vm)
+
+        println(
+            "BENCHMARK structure analysisMs=$analysisMs layoutMs=$layoutMs " +
+                "nodes=${terminal.nodeCount} visibleCards=${cards.size} " +
+                "canvasHeight=${vm!!.bounds.height} status=${terminal.status}",
+        )
+
+        assertTrue("nesting must not widen the canvas", vm.bounds.width < 4 * CanvasMetrics.CARD_WIDTH)
+        assertTrue("analysis of a structure-heavy body took $analysisMs ms", analysisMs < 60_000)
+        assertTrue("layout of ${cards.size} cards took $layoutMs ms", layoutMs < 1_000)
+        assertTrue("every card must be reachable", cards.size >= terminal.nodeCount / 2)
     }
 
     fun `test cancellation latency stays within one bounded operation`() = runBlocking {

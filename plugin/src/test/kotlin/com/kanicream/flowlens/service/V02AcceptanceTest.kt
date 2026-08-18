@@ -9,6 +9,7 @@ import com.kanicream.flowlens.core.model.FlowLimits
 import com.kanicream.flowlens.core.model.FlowNode
 import com.kanicream.flowlens.core.model.FlowNodeKind
 import com.kanicream.flowlens.core.model.FlowResultStatus
+import com.kanicream.flowlens.FlowLensBundle
 import com.kanicream.flowlens.testutil.RealJdkProjectDescriptor
 import com.kanicream.flowlens.ui.canvas.CanvasViewModelBuilder
 import kotlinx.coroutines.flow.first
@@ -121,6 +122,32 @@ class V02AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
         val events = rootEvents(result)
         assertEquals(listOf("LOOP", "done()"), names(events))
         assertEquals(listOf("size()", "visit()"), names(events[0].branches.single().events))
+    }
+
+    fun `test G a do-while carries its at-least-once marker all the way to the card`() {
+        val result = analyze(
+            "G.java",
+            """
+            public class G {
+                void run() { do { a(); } while (again()); }
+                void a() { }
+                boolean again() { return false; }
+            }
+            """.trimIndent(),
+            "void run()",
+        )
+        val loop = rootEvents(result).single()
+        assertEquals(FlowNodeKind.LOOP, loop.kind)
+        assertEquals(
+            "the model must carry the marker, not just the extractor",
+            "true",
+            loop.metadata[FlowMetadata.LOOP_RUNS_AT_LEAST_ONCE],
+        )
+        val card = CanvasViewModelBuilder.build(result, emptySet())!!.cards.single()
+        assertTrue(
+            "the card says the body runs at least once, not just \"loop\": ${card.title}",
+            card.title.startsWith(FlowLensBundle.message("card.kind.LOOP_ONCE")),
+        )
     }
 
     fun `test H a try keeps its sections and only the conditional ones are conditional`() {

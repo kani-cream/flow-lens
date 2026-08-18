@@ -127,6 +127,47 @@ class GoStructureExtractionTest : BasePlatformTestCase() {
         assertTrue(extraction.controlFlowSimplified)
     }
 
+    fun `test a break that leaves a switch case discloses nothing`() {
+        val file = myFixture.configureByText(
+            "brk.go",
+            """
+            package sample
+
+            func run(k int) {
+                switch k {
+                case 1:
+                    a()
+                    break
+                }
+            }
+            func a() { }
+            """.trimIndent(),
+        )
+        val function = PsiTreeUtil.findChildrenOfType(file, GoFunctionOrMethodDeclaration::class.java)
+            .first { it.name == "run" }
+        assertFalse(analyzer.extractDirectFlow(function).controlFlowSimplified)
+    }
+
+    fun `test a break that leaves a loop is disclosed`() {
+        val file = myFixture.configureByText(
+            "loopbrk.go",
+            """
+            package sample
+
+            func run() {
+                for {
+                    a()
+                    break
+                }
+            }
+            func a() { }
+            """.trimIndent(),
+        )
+        val function = PsiTreeUtil.findChildrenOfType(file, GoFunctionOrMethodDeclaration::class.java)
+            .first { it.name == "run" }
+        assertTrue(analyzer.extractDirectFlow(function).controlFlowSimplified)
+    }
+
     fun `test P represented control flow is no longer reported as simplified`() {
         val file = myFixture.configureByText(
             "clean.go",

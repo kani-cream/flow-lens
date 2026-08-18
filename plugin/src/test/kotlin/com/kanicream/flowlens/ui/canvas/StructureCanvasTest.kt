@@ -1,6 +1,8 @@
 package com.kanicream.flowlens.ui.canvas
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.kanicream.flowlens.FlowLensBundle
+import com.kanicream.flowlens.service.FlowMetadata
 import com.kanicream.flowlens.core.engine.FlowEventSpec
 import com.kanicream.flowlens.core.engine.FlowModelBuilder
 import com.kanicream.flowlens.core.engine.StructureSpec
@@ -153,6 +155,47 @@ class StructureCanvasTest : BasePlatformTestCase() {
         assertEquals("every structure kind is distinguishable", glyphs.size, glyphs.distinct().size)
         assertTrue(glyphs.all { it != null })
         assertEquals(CardStyle.TERMINATOR, cards.last().style)
+    }
+
+    fun `test a select and a do-while say so on the card`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        val select = b.openStructure(
+            root,
+            StructureSpec(
+                FlowNodeKind.SWITCH,
+                null,
+                null,
+                mapOf(FlowMetadata.SELECT to "true"),
+            ),
+        )!!
+        b.openBranch(select, BranchKind.CASE, "<-ch")
+        b.closeStructure(select)
+        val loop = b.openStructure(
+            root,
+            StructureSpec(
+                FlowNodeKind.LOOP,
+                null,
+                null,
+                mapOf(FlowMetadata.LOOP_RUNS_AT_LEAST_ONCE to "true"),
+            ),
+        )!!
+        b.openBranch(loop, BranchKind.BODY, null)
+        b.closeStructure(loop)
+
+        val cards = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!.cards
+        assertEquals(
+            listOf(
+                FlowLensBundle.message("card.kind.SELECT"),
+                FlowLensBundle.message("card.kind.LOOP_ONCE"),
+            ),
+            cards.map { it.title },
+        )
+        assertFalse(
+            "a select must not read as an ordinary switch",
+            cards[0].title == FlowLensBundle.message("card.kind.SWITCH"),
+        )
     }
 
     fun `test keyboard navigation reaches cards inside sections`() {

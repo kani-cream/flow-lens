@@ -289,19 +289,28 @@ The consequences:
 
 ## 26. Control flow v0.2 does not represent (v0.2)
 
-These constructs are visible in the source but not in the map. Each keeps the
-result marked as control-flow-incomplete, which is what that disclosure now
-means:
+These constructs are visible in the source but not in the map.
+
+The first three raise the control-flow-incomplete disclosure, which is what that
+warning now means:
 
 - Java `switch` fall-through: each case reads as independent, so a case without
   `break` does not show the next case running after it;
-- `break` and `continue` are not drawn as edges out of a structure, labelled or
-  otherwise;
-- a `catch` section is not connected to the `throw` that could reach it;
+- `break` and `continue` out of a loop are not drawn as edges. A `break` that
+  merely ends a switch or select case raises nothing, because the case boundary
+  already expresses it;
 - short-circuit operands (`a() && b()`), elvis (`?:`), and safe calls (`?.`)
-  keep the v0.1 conditional marker instead of becoming structures;
+  keep the v0.1 conditional marker instead of becoming structures — but only
+  when a call actually sits in the part that may be skipped. `a != null && b > 0`
+  hides no call, so it discloses nothing.
+
+The rest are silent, because there is no call the map is failing to show:
+
+- a `catch` section is not connected to the `throw` that could reach it;
 - Go `select` shows its cases, not which one a scheduler picks, nor blocking or
-  channel direction.
+  channel direction;
+- Go `panic` is an ordinary built-in call rather than a terminator, so it does
+  not visibly end its branch the way `return` does.
 
 ---
 
