@@ -210,7 +210,18 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
         }
 
         private fun walkLoop(element: GoForStatement) {
-            val body = branch(BranchKind.BODY, null) { element.children.forEach(::walk) }
+            // Evaluated once, before the loop is entered: a `for` initializer and
+            // the sequence a `range` walks. Everything else repeats (`V0.2_SPEC.md` §4).
+            val forClause = element.forClause
+            val rangeClause = element.rangeClause
+            listOfNotNull(forClause?.initStatement, rangeClause?.rangeExpression).forEach(::walk)
+            val body = branch(BranchKind.BODY, null) {
+                forClause?.expression?.let(::walk)
+                element.children
+                    .filterNot { it === forClause || it === rangeClause }
+                    .forEach(::walk)
+                forClause?.postStatement?.let(::walk)
+            }
             sink += ExtractedStructure(
                 kind = FlowNodeKind.LOOP,
                 anchor = element,

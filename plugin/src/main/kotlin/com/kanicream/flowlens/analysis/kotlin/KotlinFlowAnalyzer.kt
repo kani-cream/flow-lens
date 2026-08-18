@@ -321,7 +321,13 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                     } else {
                         SourceSummary.of(entry.conditions.joinToString(", ") { it.text })
                     },
-                ) { entry.expression?.let(::walk) }
+                ) {
+                    // A subjectless `when` puts its guard in the entry condition.
+                    // The guard is evaluated as part of choosing this entry, so it
+                    // belongs inside the section rather than before the structure.
+                    entry.conditions.forEach(::walk)
+                    entry.expression?.let(::walk)
+                }
             }
             sink += ExtractedStructure(
                 kind = FlowNodeKind.SWITCH,
