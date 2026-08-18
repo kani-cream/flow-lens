@@ -91,7 +91,7 @@ class V03AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
         // is launched, so cancelling at operation 0 can arrive before there is a
         // job to cancel and the run finishes normally. CI found that race.
         FlowRunHooks.beforeFrameOperation = { operation ->
-            if (operation.index >= 2) {
+            if (operation.index >= 1) {
                 FlowRunHooks.reset()
                 service.cancelActive()
             }

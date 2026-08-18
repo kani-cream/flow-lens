@@ -97,6 +97,11 @@ class FlowAnalysisService(
             activeHandles = handles
             lastRequest = AnalysisRequest(file, offset, effectiveLimits, relativePath)
             cancelRequestedFor = null
+            // The previous run's job is about to be cancelled and is no longer
+            // what Stop should reach. Leaving it here made a Stop pressed during
+            // the launch window cancel a run that had already finished, while the
+            // new one carried on.
+            activeJob = null
             // The old flow stops being current the moment a new root is requested
             // (REPO_LENS_LESSONS.md 3.6).
             mutableResults.value = null
