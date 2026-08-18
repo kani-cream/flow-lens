@@ -15,6 +15,11 @@ import com.intellij.openapi.ui.Messages
 import javax.swing.JComponent
 import com.kanicream.flowlens.FlowLensBundle
 import com.kanicream.flowlens.core.model.DispatchConfidence
+import com.intellij.openapi.application.ModalityState
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.project.DumbService
+import com.intellij.util.concurrency.AppExecutorUtil
+import com.kanicream.flowlens.dispatch.CandidateSearchResult
 import com.kanicream.flowlens.dispatch.CandidateFinder
 import com.kanicream.flowlens.dispatch.DispatchChoice
 import com.kanicream.flowlens.dispatch.DispatchChoices
@@ -237,10 +242,14 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
      * A call whose continuation could be chosen: one the traversal did not enter
      * and whose declaration can be searched for implementations.
      */
-    private fun canChooseImplementation(card: CardVM): Boolean =
-        card.node.targetLocation != null &&
-            card.node.targetFrameId == null &&
-            card.node.dispatchConfidence != DispatchConfidence.EXACT
+    private fun canChooseImplementation(card: CardVM): Boolean {
+        if (card.node.targetLocation == null) return false
+        if (card.node.dispatchConfidence == DispatchConfidence.EXACT) return false
+        // A card whose continuation was chosen has a body, so the "not entered"
+        // test would lock the choice in: the picker has to stay reachable for the
+        // reader to change or drop it (`V0.4_SPEC.md` §4.4).
+        return card.node.targetFrameId == null || card.chosenImplementation != null
+    }
 
     /**
      * Offers the implementations this call could reach and records the reader's
@@ -253,11 +262,28 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
         val runId = currentRunId ?: return
         val pointer = service.navigationPointer(runId, location.handle) ?: return
 
-        val found = runReadActionBlocking {
-            val declaration = pointer.element?.takeIf { it.isValid }
-                ?: return@runReadActionBlocking null
-            CandidateFinder.find(project, declaration)
-        } ?: return
+        if (DumbService.getInstance(project).isDumb) {
+            DumbService.getInstance(project).showDumbModeNotification(
+                FlowLensBundle.message("choose.indexing"),
+            )
+            return
+        }
+        // An implementation search is index-backed and unbounded, which
+        // guardrails §6 forbids on the EDT — and runReadActionBlocking could not
+        // even be interrupted. It runs in the background, cancellably, and the
+        // dialog opens when it comes back.
+        ReadAction.nonBlocking<CandidateSearchResult?> {
+            pointer.element?.takeIf { it.isValid }?.let { CandidateFinder.find(project, it) }
+        }
+            .inSmartMode(project)
+            .expireWith(this)
+            .finishOnUiThread(ModalityState.defaultModalityState()) { found ->
+                if (found != null) offerCandidates(symbol, found)
+            }
+            .submit(AppExecutorUtil.getAppExecutorService())
+    }
+
+    private fun offerCandidates(symbol: FlowSymbol, found: CandidateSearchResult) {
 
         if (found.isEmpty) {
             Messages.showInfoMessage(

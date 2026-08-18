@@ -22,7 +22,7 @@ object MarkdownExporter {
         val out = StringBuilder()
 
         out.append("# ").append(root.symbol.displayName).append("\n\n")
-        out.append(headline(result, root)).append("\n\n")
+        out.append(headline(request, result, root)).append("\n\n")
 
         appendEvents(out, request, root.events, indent = 0)
 
@@ -31,12 +31,16 @@ object MarkdownExporter {
         return out.toString()
     }
 
-    private fun headline(result: FlowAnalysisResult, root: FlowFrame): String =
+    /** The reader's word for a structure kind, falling back to the enum name. */
+    internal fun kindName(node: FlowNode, request: ExportRequest): String =
+        request.context.strings.kinds[node.kind.name] ?: node.kind.name.lowercase()
+
+    private fun headline(request: ExportRequest, result: FlowAnalysisResult, root: FlowFrame): String =
         listOfNotNull(
             root.symbol.containerName?.let { "`$it`" },
             root.symbol.languageId,
             "${result.nodeCount} nodes",
-            result.status.name.lowercase(),
+            request.context.strings.statuses[result.status.name] ?: result.status.name.lowercase(),
         ).joinToString(" · ")
 
     private fun appendEvents(
@@ -50,7 +54,10 @@ object MarkdownExporter {
             out.append(pad).append("- ").append(describe(node, request)).append("\n")
 
             for (branch in node.branches) {
-                val label = listOfNotNull(branch.kind.name.lowercase(), branch.label).joinToString(" ")
+                val label = listOfNotNull(
+                    request.context.strings.branchKinds[branch.kind.name] ?: branch.kind.name.lowercase(),
+                    branch.label,
+                ).joinToString(" ")
                 out.append(pad).append("  - **").append(label).append("**")
                 if (branch.isEmpty) {
                     out.append(" — ").append(request.context.strings.nothing).append("\n")
@@ -71,7 +78,7 @@ object MarkdownExporter {
 
     private fun describe(node: FlowNode, request: ExportRequest): String {
         val s = request.context.strings
-        val name = node.targetSymbol?.displayName ?: node.kind.name.lowercase()
+        val name = node.targetSymbol?.displayName ?: kindName(node, request)
         val head = StringBuilder("**").append(name).append("**")
         node.targetSymbol?.containerName?.let { head.append(" — `").append(it).append("`") }
 

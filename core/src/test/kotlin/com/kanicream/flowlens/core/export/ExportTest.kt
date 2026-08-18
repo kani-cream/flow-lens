@@ -179,6 +179,78 @@ class ExportTest {
     }
 
     @Test
+    fun `Q a cycle points back rather than starting a new node`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        val first = b.addEvent(root, call("recurse"))!!
+        val inner = b.openChildFrame(root, first, symbol("recurse"), null)
+        b.addEvent(
+            inner,
+            FlowEventSpec(
+                kind = FlowNodeKind.CYCLE,
+                callSiteLocation = null,
+                targetSymbol = symbol("recurse"),
+                resolutionStatus = ResolutionStatus.PROJECT_LOCAL,
+                dispatchConfidence = DispatchConfidence.EXACT,
+            ),
+        )
+        val mermaid = MermaidExporter.export(
+            ExportRequest(b.snapshot(FlowResultStatus.COMPLETED), ExportContext()),
+        )
+        // The repeated callable keeps one node; the cycle is an edge back to it.
+        assertEquals(2, Regex("^  n\\d+\\[", RegexOption.MULTILINE).findAll(mermaid).count(), mermaid)
+        assertTrue(mermaid.contains("-.->|"), mermaid)
+        assertTrue(mermaid.lines().any { it.contains("-.->|") && it.trimEnd().endsWith("n1") }, mermaid)
+    }
+
+    @Test
+    fun `a branch subgraph lists its members without swallowing the structure`() {
+        val mermaid = MermaidExporter.export(request())
+        val lines = mermaid.lines()
+        val structureLine = lines.indexOfFirst { it.contains("flag") }
+        val subgraphStart = lines.indexOfFirst { it.contains("subgraph s0") }
+        assertTrue(structureLine in 0 until subgraphStart, mermaid)
+        // Every edge comes after every subgraph block, so no edge endpoint can
+        // pull a node into a cluster it does not belong to.
+        val lastEnd = lines.indexOfLast { it.trim() == "end" }
+        val firstEdge = lines.indexOfFirst { it.contains("-->") || it.contains("-.->") }
+        assertTrue(firstEdge > lastEnd, mermaid)
+    }
+
+    @Test
+    fun `Mermaid discloses what Markdown discloses`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        b.addEvent(
+            root,
+            call("blocked", metadata = mapOf(MarkdownExporter.LIMIT_KEY to MarkdownExporter.LIMIT_DEPTH)),
+        )
+        b.addEvent(root, call("mystery", resolution = ResolutionStatus.UNRESOLVED))
+        val export = ExportRequest(b.snapshot(FlowResultStatus.COMPLETED), ExportContext())
+        val mermaid = MermaidExporter.export(export)
+
+        assertTrue(mermaid.contains("depth limit"), mermaid)
+        assertTrue(mermaid.contains("%%"), "the summary survives as comments")
+        for (line in StopReasons.of(export)) {
+            assertTrue(mermaid.contains(line), "missing from the diagram: $line")
+        }
+    }
+
+    @Test
+    fun `the reader's own words are used when supplied`() {
+        val japanese = ExportContext(
+            strings = ExportStrings(
+                kinds = mapOf("CONDITION" to "条件"),
+                branchKinds = mapOf("THEN" to "真の場合"),
+                statuses = mapOf("COMPLETED" to "完了"),
+            ),
+        )
+        val markdown = MarkdownExporter.export(ExportRequest(sample(), japanese))
+        assertTrue(markdown.contains("完了"), markdown)
+        assertTrue(markdown.contains("**真の場合**"), markdown)
+    }
+
+    @Test
     fun `T no absolute path appears in either format`() {
         val request = request()
         for (text in listOf(MarkdownExporter.export(request), MermaidExporter.export(request))) {

@@ -61,6 +61,13 @@ class CardVM(
      * A mark, never a colour on its own (`VISUAL_DESIGN.md` §21).
      */
     val pinned: Boolean = false,
+    /**
+     * The implementation the reader chose for this call, when its continuation
+     * was chosen rather than proven (`V0.4_SPEC.md` §4.5). Present here means the
+     * body below this card belongs to something other than the callable named on
+     * it, which the reader has to be able to see.
+     */
+    val chosenImplementation: String? = null,
 ) {
     val nodeId: NodeId get() = node.id
 
@@ -323,10 +330,14 @@ object CanvasViewModelBuilder {
             title = titleOf(node, ownerType),
             stateGlyph = stateGlyphOf(node, style),
             executionGlyph = executionGlyphOf(node),
-            trailingNote = if (node.metadata[FlowMetadata.TEST_SOURCE] == "true") {
-                FlowLensBundle.message("card.badge.test.source")
-            } else {
-                null
+            trailingNote = when {
+                // A chosen continuation outranks the test badge here: it changes
+                // what the body below the card is, which the reader must not miss.
+                node.metadata[FlowMetadata.CHOSEN] != null ->
+                    FlowLensBundle.message("card.badge.chosen", node.metadata[FlowMetadata.CHOSEN]!!)
+                node.metadata[FlowMetadata.TEST_SOURCE] == "true" ->
+                    FlowLensBundle.message("card.badge.test.source")
+                else -> null
             },
             tooltip = tooltipOf(node),
             style = style,
@@ -343,6 +354,7 @@ object CanvasViewModelBuilder {
             expandable = expandable,
             expanded = expanded,
             pinned = node.targetSymbol?.key?.let { it in pinnedKeys } == true,
+            chosenImplementation = node.metadata[FlowMetadata.CHOSEN],
             // The target frame exists but has not been analyzed yet: a transient
             // UI-only state that never counts against the node budget. Once the run
             // is terminal nothing is being resolved any more, so a frame left
@@ -456,6 +468,9 @@ object CanvasViewModelBuilder {
         node.dispatchConfidence?.let { add(FlowLensBundle.message("enum.dispatch.${it.name}")) }
         if (node.executionMode != ExecutionMode.SYNC) {
             add(FlowLensBundle.message("enum.execution.${node.executionMode.name}"))
+        }
+        node.metadata[FlowMetadata.CHOSEN]?.let {
+            add(FlowLensBundle.message("card.tooltip.chosen", it))
         }
         node.metadata[FlowMetadata.ORIGIN]?.let { add(FlowLensBundle.message("enum.origin.$it")) }
         if (node.metadata[FlowMetadata.CONDITIONAL] == "true") {

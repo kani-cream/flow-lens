@@ -41,6 +41,12 @@ data class ExportStrings(
     val dispatchChoices: String = "Dispatch choices",
     val controlFlowSimplified: String = "control flow simplified",
     val chosenByReader: String = "chosen by the reader",
+    /** Structure kinds, keyed by [com.kanicream.flowlens.core.model.FlowNodeKind] name. */
+    val kinds: Map<String, String> = emptyMap(),
+    /** Branch kinds, keyed by [com.kanicream.flowlens.core.model.BranchKind] name. */
+    val branchKinds: Map<String, String> = emptyMap(),
+    /** Result statuses, keyed by [com.kanicream.flowlens.core.model.FlowResultStatus] name. */
+    val statuses: Map<String, String> = emptyMap(),
 )
 
 /** What every exporter is handed. */

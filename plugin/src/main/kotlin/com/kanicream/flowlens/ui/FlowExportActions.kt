@@ -9,6 +9,9 @@ import com.kanicream.flowlens.core.export.ExportRequest
 import com.kanicream.flowlens.core.export.ExportStrings
 import com.kanicream.flowlens.core.export.MarkdownExporter
 import com.kanicream.flowlens.core.export.MermaidExporter
+import com.kanicream.flowlens.core.model.BranchKind
+import com.kanicream.flowlens.core.model.FlowNodeKind
+import com.kanicream.flowlens.core.model.FlowResultStatus
 import com.kanicream.flowlens.core.model.FlowAnalysisResult
 import com.kanicream.flowlens.dispatch.DispatchChoices
 import java.awt.datatransfer.StringSelection
@@ -41,8 +44,13 @@ object FlowExport {
      * the tool window and repeats what was chosen (`V0.4_SPEC.md` §5.2).
      */
     private fun contextOf(project: Project): ExportContext = ExportContext(
-        choices = DispatchChoices.getInstance(project).all().map {
-            ChoiceLine(it.fromDisplayName, it.to.displayName)
+        choices = DispatchChoices.getInstance(project).all().map { choice ->
+            // Container plus name on both sides: two implementations of one
+            // method are otherwise indistinguishable in the export.
+            ChoiceLine(
+                choice.fromDisplayName,
+                listOfNotNull(choice.to.containerName, choice.to.displayName).joinToString("."),
+            )
         },
         strings = ExportStrings(
             ambiguous = FlowLensBundle.message("enum.dispatch.AMBIGUOUS"),
@@ -63,6 +71,17 @@ object FlowExport {
             dispatchChoices = FlowLensBundle.message("export.dispatch.choices"),
             controlFlowSimplified = FlowLensBundle.message("status.control.flow.simplified"),
             chosenByReader = FlowLensBundle.message("export.chosen.by.reader"),
+            // The same words the canvas uses, so an export reads in the reader's
+            // language rather than in enum names.
+            kinds = FlowNodeKind.entries.associate {
+                it.name to FlowLensBundle.message("enum.kind.${it.name}")
+            },
+            branchKinds = BranchKind.entries.associate {
+                it.name to FlowLensBundle.message("branch.kind.${it.name}")
+            },
+            statuses = FlowResultStatus.entries.associate {
+                it.name to FlowLensBundle.message("enum.result.${it.name}")
+            },
         ),
     )
 }

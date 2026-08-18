@@ -90,6 +90,12 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
         }
     }
 
+    private fun interfaceKey(): String = runReadActionBlocking {
+        com.kanicream.flowlens.analysis.FlowAnalyzerRegistry
+            .forDeclaration(interfaceMethod())!!
+            .describeCallable(interfaceMethod()).key
+    }
+
     private fun interfaceMethod(): com.intellij.psi.PsiElement = runReadActionBlocking {
         val file = myFixture.javaFacade.findClass("demo.Gateway")!!
         PsiTreeUtil.findChildrenOfType(file, PsiMethod::class.java).first { it.name == "charge" }
@@ -158,14 +164,97 @@ class DispatchChoiceTest : LightJavaCodeInsightFixtureTestCase() {
             call.dispatchConfidence,
         )
         assertEquals(
-            "and it says whose body it is showing",
-            "charge()",
+            "and it says whose body it is showing, unambiguously",
+            "StripeGateway.charge()",
             call.metadata[FlowMetadata.CHOSEN],
         )
         assertEquals(
             "the card still names the callable that was actually called",
             "Gateway",
             call.targetSymbol?.containerName,
+        )
+    }
+
+    fun `test the card and the details panel both say the continuation was chosen`() {
+        // The honesty rule is about what the reader sees. The model getting it
+        // right while the canvas stays silent is the failure this guards.
+        val candidate = runReadActionBlocking { CandidateFinder.find(project, interfaceMethod()) }
+            .candidates.first { it.symbol.containerName == "StripeGateway" }
+        choices.choose(DispatchChoice(interfaceKey(), "Gateway.charge()", candidate.entry))
+
+        val result = analyze()
+        val card = com.kanicream.flowlens.ui.canvas.CanvasViewModelBuilder
+            .build(result, emptySet())!!.cards.first()
+
+        assertEquals("StripeGateway.charge()", card.chosenImplementation)
+        assertTrue(
+            "the card carries a visible mark, not just a field: ${card.trailingNote}",
+            card.trailingNote?.contains("StripeGateway") == true,
+        )
+        assertTrue(
+            "and the tooltip explains it: ${card.tooltip}",
+            card.tooltip?.contains("StripeGateway") == true,
+        )
+
+        val details = com.kanicream.flowlens.ui.details.FlowDetailsModel.stateOf(card.node)
+        val chosenRow = details.rows.firstOrNull { it.value.contains("StripeGateway") }
+        assertNotNull("the details panel names what was chosen", chosenRow)
+        assertFalse(
+            "a raw bundle key must not reach the panel",
+            chosenRow!!.label.startsWith("details."),
+        )
+    }
+
+    fun `test a choice does not replace a body the analyzer could prove`() {
+        // A call the traversal would enter anyway is not what a choice is for;
+        // substituting a subclass there would replace fact with guess.
+        ApplicationManager.getApplication().invokeAndWait {
+            myFixture.addFileToProject(
+                "demo/Base.java",
+                """
+                package demo;
+                public class Base { public void work() { helper(); } void helper() { } }
+                """.trimIndent(),
+            )
+            myFixture.addFileToProject(
+                "demo/Derived.java",
+                """
+                package demo;
+                public class Derived extends Base { public void work() { other(); } void other() { } }
+                """.trimIndent(),
+            )
+            myFixture.configureByText(
+                "Runner.java",
+                """
+                public class Runner {
+                    demo.Base base;
+                    void run() { base.work(); }
+                }
+                """.trimIndent(),
+            )
+        }
+        val baseWork = runReadActionBlocking {
+            val cls = myFixture.javaFacade.findClass("demo.Base")!!
+            PsiTreeUtil.findChildrenOfType(cls, PsiMethod::class.java).first { it.name == "work" }
+        }
+        val key = runReadActionBlocking {
+            com.kanicream.flowlens.analysis.FlowAnalyzerRegistry
+                .forDeclaration(baseWork)!!.describeCallable(baseWork).key
+        }
+        val derived = runReadActionBlocking { CandidateFinder.find(project, baseWork) }
+            .candidates.first { it.symbol.containerName == "Derived" }
+        choices.choose(DispatchChoice(key, "Base.work()", derived.entry))
+
+        val result = analyze()
+        val call = result.rootFrame!!.events.first()
+        assertNull(
+            "the provable body must not be swapped for a chosen one",
+            call.metadata[FlowMetadata.CHOSEN],
+        )
+        val body = result.frame(call.targetFrameId!!)!!
+        assertEquals(
+            listOf("helper()"),
+            body.events.map { it.targetSymbol?.displayName },
         )
     }
 
