@@ -226,6 +226,29 @@ class CanvasViewModelTest : BasePlatformTestCase() {
         assertFalse("an ordinary call still is", cards[0].dashedIncomingConnector)
     }
 
+    fun `test the first call in a frame gets room for its boundary marker`() {
+        // Regression: the marker was drawn on the connector between two cards, so
+        // the first card in a frame never got one — and two identical external
+        // calls looked different depending on where they sat. The flag was
+        // already true here; only the layout and the painting ignored it.
+        fun firstCardTop(resolution: ResolutionStatus): Int {
+            val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+            val root = b.openRootFrame(symbol("root"), null)
+            b.addEvent(root, spec("post", resolution = resolution))
+            return CanvasViewModelBuilder
+                .build(b.snapshot(FlowResultStatus.COMPLETED), emptySet())!!
+                .cards[0].bounds.y
+        }
+
+        val external = firstCardTop(ResolutionStatus.EXTERNAL)
+        val local = firstCardTop(ResolutionStatus.PROJECT_LOCAL)
+        assertEquals(
+            "the crossing needs the same room here as it does between two cards",
+            CanvasMetrics.BOUNDARY_GAP,
+            external - local,
+        )
+    }
+
     fun `test one line cards keep the flow as short as the sequence allows`() {
         val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
         val root = b.openRootFrame(symbol("root"), null)

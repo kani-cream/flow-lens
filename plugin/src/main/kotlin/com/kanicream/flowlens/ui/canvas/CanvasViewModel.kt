@@ -564,12 +564,14 @@ object CanvasViewModelBuilder {
     private fun layoutCards(cards: List<CardVM>, cardX: Int, top: Int, contentWidth: Int): Int {
         var cursorY = top
         cards.forEachIndexed { index, card ->
-            if (index > 0) {
-                cursorY += if (card.boundaryBeforeCard) {
-                    CanvasMetrics.BOUNDARY_GAP
-                } else {
-                    CanvasMetrics.CONNECTOR_GAP
-                }
+            cursorY += when {
+                // A frame's own body is project code, so the first call in it can
+                // cross out of the project like any other. Without room for the
+                // marker it would be the one crossing the reader is never shown,
+                // and two identical external calls would look different.
+                card.boundaryBeforeCard -> CanvasMetrics.BOUNDARY_GAP
+                index > 0 -> CanvasMetrics.CONNECTOR_GAP
+                else -> 0
             }
             card.bounds = Rectangle(cardX, cursorY, contentWidth, CanvasMetrics.CARD_HEIGHT)
             cursorY += CanvasMetrics.CARD_HEIGHT
