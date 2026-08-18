@@ -22,7 +22,10 @@ object MermaidExporter {
         val root = request.result.rootFrame ?: return ""
         val doc = Document(request)
         val rootId = doc.declare(escape(root.symbol.displayName))
-        doc.walk(root.events, parent = rootId, keyOfCaller = root.symbol.key)
+        // The root is a callable like any other: a flow that calls back into it
+        // has to point at this node rather than draw a second one.
+        doc.register(root.symbol.key, rootId)
+        doc.walk(root.events, from = setOf(rootId))
         return doc.render()
     }
 
@@ -42,8 +45,21 @@ object MermaidExporter {
             return id
         }
 
-        fun walk(events: List<FlowNode>, parent: String, keyOfCaller: String?): String {
-            var previous = parent
+        fun register(key: String, id: String) {
+            idsByKey.putIfAbsent(key, id)
+        }
+
+        /**
+         * Emits one sequence and returns the ends the next event follows from.
+         *
+         * A structure has several ends — one per branch — and they all lead to
+         * whatever comes after it. Returning a single node instead made the step
+         * after an `if` hang off the `if` itself, drawn as a third alternative
+         * beside `then` and `else` rather than as where the paths come back
+         * together (`V0.2_SPEC.md` §7).
+         */
+        fun walk(events: List<FlowNode>, from: Set<String>): Set<String> {
+            var frontier = from
             for (node in events) {
                 // A cycle is an edge back to where that callable was already
                 // drawn, rather than a second node claiming to be a new call.
@@ -51,41 +67,64 @@ object MermaidExporter {
                     ?.targetSymbol?.key
                     ?.let { idsByKey[it] }
                 if (repeats != null) {
-                    edges += "  $previous -.->|${label(node, request).let(::inlineLabel)}| $repeats"
+                    val label = inlineLabel(label(node, request))
+                    frontier.forEach { edges += "  $it -.->|$label| $repeats" }
+                    // A cycle ends its path; what follows the structure comes
+                    // from the other branches.
+                    frontier = emptySet()
                     continue
                 }
 
                 val id = declare(label(node, request))
-                node.targetSymbol?.key?.let { idsByKey.putIfAbsent(it, id) }
-                edges += "  $previous${edge(node)}$id"
-
-                for (branch in node.branches) {
-                    val title = listOfNotNull(
-                        request.context.strings.branchKinds[branch.kind.name]
-                            ?: branch.kind.name.lowercase(),
-                        branch.label,
-                    ).joinToString(" ")
-                    val group = Subgraph("s${subgraphs.size}", escape(title), mutableListOf())
-                    subgraphs += group
-                    if (branch.isEmpty) {
-                        group.members += declare(escape(request.context.strings.nothing))
-                    } else {
-                        val before = nodes.size
-                        walk(branch.events, parent = id, keyOfCaller = keyOfCaller)
-                        for (index in before until nodes.size) group.members += "n$index"
-                    }
-                }
+                node.targetSymbol?.key?.let { register(it, id) }
+                frontier.forEach { edges += "  $it${edge(node)}$id" }
 
                 val body = node.targetFrameId?.let(request.result::frame)
                 if (body != null && body.events.isNotEmpty()) {
-                    walk(body.events, parent = id, keyOfCaller = node.targetSymbol?.key)
+                    // A body is a detour: the sequence continues from the call,
+                    // not from the last thing the callee did.
+                    walk(body.events, from = setOf(id))
                 }
-                previous = id
+
+                frontier = if (node.branches.isEmpty()) {
+                    setOf(id)
+                } else {
+                    branchEnds(node, id)
+                }
+                if (frontier.isEmpty()) frontier = setOf(id)
             }
-            return previous
+            return frontier
+        }
+
+        /** Each branch's last node, which is where the paths reconverge. */
+        private fun branchEnds(node: FlowNode, structureId: String): Set<String> {
+            val ends = mutableSetOf<String>()
+            for (branch in node.branches) {
+                val title = listOfNotNull(
+                    request.context.strings.branchKinds[branch.kind.name]
+                        ?: branch.kind.name.lowercase(),
+                    branch.label,
+                ).joinToString(" ")
+                val group = Subgraph("s${subgraphs.size}", escape(title), mutableListOf())
+                subgraphs += group
+                if (branch.isEmpty) {
+                    val empty = declare(escape(request.context.strings.nothing))
+                    group.members += empty
+                    edges += "  $structureId${" --> "}$empty"
+                    ends += empty
+                } else {
+                    val before = nodes.size
+                    ends += walk(branch.events, from = setOf(structureId))
+                    for (index in before until nodes.size) group.members += "n$index"
+                }
+            }
+            return ends
         }
 
         fun render(): String = buildString {
+            // Fenced, because the point is pasting into GitHub Markdown, where a
+            // bare "flowchart TD" is a paragraph of text rather than a diagram.
+            append("```mermaid\n")
             append("flowchart TD\n")
             nodes.forEach { append(it).append("\n") }
             for (group in subgraphs) {
@@ -100,11 +139,12 @@ object MermaidExporter {
             for (line in StopReasons.of(request)) {
                 append("  %% ").append(comment(line)).append("\n")
             }
-            for (choice in request.context.choices) {
+            for (choice in AppliedChoices.of(request.result)) {
                 append("  %% ").append(comment(request.context.strings.dispatchChoices))
                     .append(": ").append(comment(choice.from)).append(" -> ")
                     .append(comment(choice.to)).append("\n")
             }
+            append("```\n")
         }
     }
 

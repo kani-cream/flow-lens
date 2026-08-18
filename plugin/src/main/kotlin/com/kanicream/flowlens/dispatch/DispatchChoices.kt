@@ -54,6 +54,18 @@ class DispatchChoices {
         onChanged()
     }
 
+    /**
+     * Removes choices the run just found unusable, without asking for another
+     * run. The run that discovered them already produced a result that does not
+     * apply them and carries the warning; re-analysing would replace that result
+     * with one from a newer run, and the warning would never reach the reader
+     * (`V0.4_SPEC.md` §4.6).
+     */
+    fun dropStale(keys: Set<String>) {
+        if (keys.isEmpty()) return
+        synchronized(lock) { choices = choices - keys }
+    }
+
     fun clearAll() {
         synchronized(lock) { choices = emptyMap() }
         onChanged()

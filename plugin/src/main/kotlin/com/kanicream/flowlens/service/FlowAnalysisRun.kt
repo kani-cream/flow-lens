@@ -37,6 +37,7 @@ import com.kanicream.flowlens.analysis.TargetClassifier
 import com.kanicream.flowlens.workflow.EntryResolution
 import com.kanicream.flowlens.workflow.FlowEntryRef
 import com.kanicream.flowlens.workflow.FlowEntryResolver
+import com.kanicream.flowlens.dispatch.CandidateFinder
 import com.kanicream.flowlens.core.model.FlowSymbol
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.core.model.RunId
@@ -616,6 +617,16 @@ internal class FlowAnalysisRun(
         val declaration = resolution.declaration
         val analyzer = FlowAnalyzerRegistry.forDeclaration(declaration) ?: return null
         if (!analyzer.hasAnalyzableBody(declaration)) return null
+        // The choice was made about a callable that implemented this one. Nothing
+        // stops the `implements` clause from being deleted afterwards while the
+        // method itself keeps its name and file — and then the choice would send
+        // the traversal into a method with no relationship to the call at all.
+        // Asking the same search that offered it is what keeps §4.6 true.
+        if (!stillImplements(target.declaration, declaration)) {
+            resolvedChoices[key] = Memo(null)
+            staleChoiceKeys += key
+            return null
+        }
         val classified = TargetClassifier.classify(
             project,
             declaration,
@@ -644,6 +655,19 @@ internal class FlowAnalysisRun(
             FlowDiagnostic(FlowDiagnosticSeverity.WARNING, "flow.warning.choice.unresolved"),
         )
         onStaleChoices(staleChoiceKeys.toSet())
+    }
+
+    /**
+     * Whether [chosen] is still an implementation of [original]. Searched once
+     * per choice per run, not per call, because the answer cannot differ within
+     * one run's read of the source.
+     */
+    private fun stillImplements(original: PsiElement?, chosen: PsiElement): Boolean {
+        if (original == null) return false
+        return CandidateFinder.find(project, original, limits).candidates.any { candidate ->
+            candidate.symbol.key ==
+                FlowAnalyzerRegistry.forDeclaration(chosen)?.describeCallable(chosen)?.key
+        }
     }
 
     /** Whether the traversal would enter [target] with no choice involved. */
