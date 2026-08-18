@@ -84,6 +84,11 @@ object FlowDetailsModel {
                 },
             ),
         )
+        node.metadata[FlowMetadata.CHOSEN]?.let {
+            // Whose body is under this call, and that a reader chose it rather
+            // than the analyzer proving it (`V0.4_SPEC.md` §4.5).
+            add(row("details.chosen", FlowLensBundle.message("details.chosen.value", it)))
+        }
         node.metadata[FlowMetadata.ORIGIN]?.let {
             add(row("details.origin", FlowLensBundle.message("enum.origin.$it")))
         }

@@ -15,6 +15,7 @@ import com.kanicream.flowlens.core.model.RunId
 import com.kanicream.flowlens.core.model.FlowResultStatus
 import com.kanicream.flowlens.workflow.FlowEntryRef
 import com.kanicream.flowlens.workflow.FlowLensRecents
+import com.kanicream.flowlens.dispatch.DispatchChoices
 import com.kanicream.flowlens.settings.FlowLensSettings
 import com.intellij.psi.PsiElement
 import kotlinx.coroutines.CoroutineScope
@@ -114,9 +115,14 @@ class FlowAnalysisService(
             file = file,
             offset = offset,
             limits = effectiveLimits,
+            choices = DispatchChoices.getInstance(project).snapshot(),
             handles = handles,
             publishResult = ::acceptResult,
             publishProgress = ::acceptProgress,
+            onStaleChoices = { keys ->
+                val store = DispatchChoices.getInstance(project)
+                keys.forEach(store::clear)
+            },
         )
         val job = scope.launch(Dispatchers.Default) { run.execute() }
         synchronized(lock) {

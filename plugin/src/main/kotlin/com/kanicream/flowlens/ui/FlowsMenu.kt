@@ -11,6 +11,8 @@ import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.kanicream.flowlens.FlowLensBundle
 import com.kanicream.flowlens.core.model.FlowLimits
+import com.kanicream.flowlens.dispatch.DispatchChoice
+import com.kanicream.flowlens.dispatch.DispatchChoices
 import com.kanicream.flowlens.workflow.FlowEntryRef
 import com.kanicream.flowlens.workflow.FlowEntryResolver
 import com.kanicream.flowlens.workflow.FlowLensFlows
@@ -64,6 +66,12 @@ class FlowsMenu(
             addSection("flows.group.pins", pins.map { pin ->
                 OpenEntryAction(pin.displayName, pin, null, present)
             })
+            // A choice that cannot be undone is a trap, and the reader also has to
+            // be able to see which ones are in effect (`V0.4_SPEC.md` §4.4).
+            addSection(
+                "flows.group.choices",
+                DispatchChoices.getInstance(project).all().map(::ClearChoiceAction),
+            )
         }
     }
 
@@ -117,6 +125,25 @@ class FlowsMenu(
 
         override fun actionPerformed(e: AnActionEvent) {
             if (found) openEntry(ref, limits)
+        }
+    }
+
+    /** Removes one dispatch choice, which re-runs without it. */
+    private inner class ClearChoiceAction(
+        private val choice: DispatchChoice,
+    ) : AnAction(
+        FlowLensBundle.message(
+            "flows.choice.clear",
+            choice.fromDisplayName,
+            listOfNotNull(choice.to.containerName, choice.to.displayName).joinToString("."),
+        ),
+        null,
+        null,
+    ), DumbAware {
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+
+        override fun actionPerformed(e: AnActionEvent) {
+            DispatchChoices.getInstance(project).clear(choice.fromKey)
         }
     }
 

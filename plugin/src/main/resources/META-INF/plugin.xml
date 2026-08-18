@@ -20,6 +20,17 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>0.4.0 — Ambiguity and sharing.</b></p>
+        <ul>
+            <li>An interface or abstract call is no longer a dead end: Flow Lens
+            lists the implementations the project contains and follows the one you
+            choose. The call still reports the dispatch confidence it actually
+            has — a choice is not a proof — and says whose body it is showing.</li>
+            <li>Export a flow as Markdown or as a Mermaid flowchart, carrying the
+            same uncertainty the canvas shows, so a map can go into a review or an
+            issue.</li>
+        </ul>
+
         <p><b>0.3.0 — Developer workflow.</b></p>
         <ul>
             <li><b>Flow Pins</b>: mark a function and it stands out in every flow

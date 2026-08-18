@@ -30,6 +30,14 @@ object FlowMetadata {
      */
     const val ANALYZABLE = "flowlens.analyzable"
 
+    /**
+     * Present, holding the chosen callable's display name, when the reader
+     * picked this call's continuation (`V0.4_SPEC.md` §4.5). The dispatch
+     * confidence is deliberately left alone: a choice is not a proof, and a
+     * chosen call must never read like an exact one.
+     */
+    const val CHOSEN = "flowlens.chosen"
+
     /** Present ("true") on a Go `select`, which chooses among communications. */
     const val SELECT = "flowlens.select"
 }

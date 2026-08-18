@@ -32,6 +32,11 @@ import com.kanicream.flowlens.core.model.FlowNodeKind
 import com.kanicream.flowlens.core.model.FlowProgress
 import com.kanicream.flowlens.core.model.FlowProgressStage
 import com.kanicream.flowlens.core.model.FlowResultStatus
+import com.intellij.psi.PsiElement
+import com.kanicream.flowlens.analysis.TargetClassifier
+import com.kanicream.flowlens.workflow.EntryResolution
+import com.kanicream.flowlens.workflow.FlowEntryRef
+import com.kanicream.flowlens.workflow.FlowEntryResolver
 import com.kanicream.flowlens.core.model.FlowSymbol
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.core.model.RunId
@@ -60,9 +65,13 @@ internal class FlowAnalysisRun(
     private val file: VirtualFile,
     private val offset: Int,
     private val limits: FlowLimits,
+    /** Dispatch choices in effect, keyed by the callable they replace (§4). */
+    private val choices: Map<String, FlowEntryRef>,
     private val handles: RunHandles,
     private val publishResult: (FlowAnalysisResultEvent) -> Unit,
     private val publishProgress: (FlowProgress) -> Unit,
+    /** Choices whose implementation could not be found, so they can be dropped. */
+    private val onStaleChoices: (Set<String>) -> Unit = {},
 ) {
     private val startNanos = System.nanoTime()
     private var operationIndex = 0
@@ -187,6 +196,7 @@ internal class FlowAnalysisRun(
                 publishResult(FlowAnalysisResultEvent(runId, modelBuilder.snapshot(FlowResultStatus.RUNNING)))
             }
 
+            reportStaleChoices(modelBuilder)
             val status = when {
                 stale -> FlowResultStatus.STALE
                 truncated || modelBuilder.wasTruncated -> FlowResultStatus.TRUNCATED
@@ -315,9 +325,16 @@ internal class FlowAnalysisRun(
         val isCycle = call.cycleKey != null && task.path.contains(call.cycleKey)
         val depthExceeded = call.recursable && !isCycle && task.depth + 1 > limits.maxDepth
         val spec = when {
-            isCycle -> call.spec.copy(kind = FlowNodeKind.CYCLE)
+            // Neither a cycle nor a depth-blocked call shows a body, so neither
+            // may claim a chosen continuation: "chosen: X" over nothing would say
+            // the reader is looking at X when they are not (`V0.4_SPEC.md` §4.5).
+            isCycle -> call.spec.copy(
+                kind = FlowNodeKind.CYCLE,
+                metadata = call.spec.metadata - FlowMetadata.CHOSEN,
+            )
             depthExceeded -> call.spec.copy(
-                metadata = call.spec.metadata + (FlowMetadata.LIMIT to FlowMetadata.LIMIT_DEPTH),
+                metadata = call.spec.metadata - FlowMetadata.CHOSEN +
+                    (FlowMetadata.LIMIT to FlowMetadata.LIMIT_DEPTH),
             )
             else -> call.spec
         }
@@ -478,6 +495,11 @@ internal class FlowAnalysisRun(
                 LOG.warn("Flow Lens call resolution failed: ${e.javaClass.simpleName}")
                 com.kanicream.flowlens.analysis.ResolvedCallTarget.UNRESOLVED
             }
+            // A choice replaces only what the traversal would otherwise refuse to
+            // enter. Everything the model says about the call — its resolution,
+            // its dispatch confidence — is left exactly as resolution found it
+            // (`V0.4_SPEC.md` §4.5).
+            val chosen = chosenContinuationFor(target)
             val metadata = buildMap {
                 put(FlowMetadata.ORIGIN, target.sourceOrigin.name)
                 if (target.inTestSource) put(FlowMetadata.TEST_SOURCE, "true")
@@ -488,17 +510,41 @@ internal class FlowAnalysisRun(
                     put(FlowMetadata.ANALYZABLE, "true")
                 }
             }
-            val recursable = TraversalPolicy.mayEnterBody(
-                TargetFacts(
-                    hasAnalyzableBody = target.hasAnalyzableBody,
-                    origin = target.sourceOrigin,
-                    resolution = target.resolutionStatus,
-                    dispatch = target.dispatchConfidence,
-                    inTestSource = target.inTestSource,
-                ),
-                limits,
-            )
+            val recursable = if (chosen != null) {
+                // The chosen implementation is what gets entered, so policy is
+                // asked about it rather than about the declaration that could
+                // not be resolved.
+                TraversalPolicy.mayEnterBody(
+                    TargetFacts(
+                        hasAnalyzableBody = true,
+                        origin = chosen.origin,
+                        resolution = chosen.resolution,
+                        dispatch = DispatchConfidence.EXACT,
+                        inTestSource = chosen.inTestSource,
+                    ),
+                    limits,
+                )
+            } else {
+                TraversalPolicy.mayEnterBody(
+                    TargetFacts(
+                        hasAnalyzableBody = target.hasAnalyzableBody,
+                        origin = target.sourceOrigin,
+                        resolution = target.resolutionStatus,
+                        dispatch = target.dispatchConfidence,
+                        inTestSource = target.inTestSource,
+                    ),
+                    limits,
+                )
+            }
             val symbol = target.symbol ?: fallbackSymbol(analyzer.languageId, call.calleeShortName)
+            // Only claim a choice when its body is actually being shown. A choice
+            // that policy or the depth limit refused would otherwise put "chosen:
+            // X" on a card with nothing under it.
+            val effectiveMetadata = if (chosen != null && recursable) {
+                metadata + (FlowMetadata.CHOSEN to qualifiedName(chosen.symbol))
+            } else {
+                metadata
+            }
             ComputedCall(
                 spec = FlowEventSpec(
                     kind = if (target.isConstructor) FlowNodeKind.CONSTRUCTOR else call.kind,
@@ -515,19 +561,110 @@ internal class FlowAnalysisRun(
                     dispatchConfidence = target.dispatchConfidence,
                     executionMode = call.executionMode,
                     orderingStatus = call.orderingStatus,
-                    metadata = metadata,
+                    metadata = effectiveMetadata,
                 ),
                 recursable = recursable,
-                cycleKey = target.symbol?.key,
-                childSymbol = target.symbol,
-                childEntryLocation = if (recursable && target.declaration != null) {
-                    handles.locationOf(target.declaration)
-                } else {
-                    null
+                // What gets entered is the chosen implementation, so it is also
+                // what cycle detection and the child frame are about. The node
+                // itself still describes the call as resolution found it.
+                cycleKey = chosen?.symbol?.key ?: target.symbol?.key,
+                childSymbol = chosen?.symbol ?: target.symbol,
+                childEntryLocation = when {
+                    !recursable -> null
+                    chosen != null -> handles.locationOf(chosen.declaration)
+                    target.declaration != null -> handles.locationOf(target.declaration)
+                    else -> null
                 },
             )
         }
     }
+
+    /** A chosen implementation, resolved and classified like any other target. */
+    private class ChosenContinuation(
+        val declaration: PsiElement,
+        val symbol: FlowSymbol,
+        val origin: SourceOrigin,
+        val resolution: ResolutionStatus,
+        val inTestSource: Boolean,
+    )
+
+    /**
+     * The implementation the reader chose for this call, if any and if it still
+     * exists. A choice pointing at something that is gone is simply not applied,
+     * so the call reverts to the dead end it was rather than continuing
+     * somewhere else (`V0.4_SPEC.md` §4.6).
+     */
+    private fun chosenContinuationFor(
+        target: com.kanicream.flowlens.analysis.ResolvedCallTarget,
+    ): ChosenContinuation? {
+        val key = target.symbol?.key ?: return null
+        val ref = choices[key] ?: return null
+        // A choice stands in for a continuation that could not be proven. If the
+        // traversal would have entered the real declaration anyway, substituting
+        // a subclass body would replace something provable with something the
+        // reader guessed (`V0.4_SPEC.md` §4).
+        if (canEnterWithoutChoice(target)) return null
+        resolvedChoices[key]?.let { return it.value }
+        val resolution = FlowEntryResolver.resolve(project, ref)
+        if (resolution !is EntryResolution.Found) {
+            // §4.6: a choice pointing at something that is gone is not applied,
+            // and the reader is told rather than left with a silent dead end.
+            resolvedChoices[key] = Memo(null)
+            staleChoiceKeys += key
+            return null
+        }
+        val declaration = resolution.declaration
+        val analyzer = FlowAnalyzerRegistry.forDeclaration(declaration) ?: return null
+        if (!analyzer.hasAnalyzableBody(declaration)) return null
+        val classified = TargetClassifier.classify(
+            project,
+            declaration,
+            DispatchConfidence.EXACT,
+        )
+        val continuation = ChosenContinuation(
+            declaration = declaration,
+            symbol = classified.symbol ?: analyzer.describeCallable(declaration),
+            origin = classified.sourceOrigin,
+            resolution = classified.resolutionStatus,
+            inTestSource = classified.inTestSource,
+        )
+        resolvedChoices[key] = Memo(continuation)
+        return continuation
+    }
+
+    /**
+     * §4.6: a choice whose implementation is gone is dropped, and the reader is
+     * told rather than left wondering why a call went back to being a dead end.
+     * The message carries no name — a diagnostic is a log-adjacent surface
+     * (guardrails §13) — and the choice list itself shows which one went.
+     */
+    private fun reportStaleChoices(builder: FlowModelBuilder) {
+        if (staleChoiceKeys.isEmpty()) return
+        builder.addDiagnostic(
+            FlowDiagnostic(FlowDiagnosticSeverity.WARNING, "flow.warning.choice.unresolved"),
+        )
+        onStaleChoices(staleChoiceKeys.toSet())
+    }
+
+    /** Whether the traversal would enter [target] with no choice involved. */
+    private fun canEnterWithoutChoice(
+        target: com.kanicream.flowlens.analysis.ResolvedCallTarget,
+    ): Boolean = TraversalPolicy.mayEnterBody(
+        TargetFacts(
+            hasAnalyzableBody = target.hasAnalyzableBody,
+            origin = target.sourceOrigin,
+            resolution = target.resolutionStatus,
+            dispatch = target.dispatchConfidence,
+            inTestSource = target.inTestSource,
+        ),
+        limits,
+    )
+
+    /** Container plus name, so two implementations of one method are distinguishable. */
+    private fun qualifiedName(symbol: FlowSymbol): String =
+        listOfNotNull(symbol.containerName, symbol.displayName).joinToString(".")
+
+    private class Memo(val value: ChosenContinuation?)
 
     private fun fallbackSymbol(languageId: String, shortName: String): FlowSymbol =
         FlowSymbol(
@@ -545,6 +682,12 @@ internal class FlowAnalysisRun(
 
     /** What the run is working on, for the stage line. Never logged. */
     private var currentCallable: String? = null
+
+    /** Resolving a choice walks a whole file; once per run is enough. */
+    private val resolvedChoices = mutableMapOf<String, Memo>()
+
+    /** Choices whose target is gone, so the reader can be told (§4.6). */
+    private val staleChoiceKeys = mutableSetOf<String>()
 
     private fun progress(stage: FlowProgressStage) {
         publishProgress(buildProgress(stage))
