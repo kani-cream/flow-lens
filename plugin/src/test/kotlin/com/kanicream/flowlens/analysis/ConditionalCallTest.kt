@@ -12,9 +12,13 @@ import com.goide.psi.GoFunctionOrMethodDeclaration
 import org.jetbrains.kotlin.psi.KtNamedFunction
 
 /**
- * Conditional-execution marking (`V0.1_SPEC.md` §13): calls that may not run must
- * be distinguishable so the renderer never claims a proven path. Calls that always
- * run must NOT be marked — the negative control matters as much as the positive.
+ * The conditional marker after v0.2 (`V0.2_SPEC.md` §5).
+ *
+ * Branches, loops, and exception handling are now represented as structures, so
+ * a call inside one is no longer marked: its section already says it may be
+ * skipped, and marking it too would double the signal. The marker is reserved
+ * for what v0.2 does not represent — short-circuit operands, elvis, safe calls —
+ * which is exactly where the renderer still needs it.
  */
 class ConditionalCallTest : LightJavaCodeInsightFixtureTestCase() {
 
@@ -36,53 +40,23 @@ class ConditionalCallTest : LightJavaCodeInsightFixtureTestCase() {
             .associate { it.calleeShortName to it.conditional }
     }
 
-    fun `test java if branches are conditional but the condition is not`() {
-        val flow = javaFlow("if (cond()) { a(); } else { b(); } c();")
-        assertEquals(false, flow["cond"])
-        assertEquals(true, flow["a"])
-        assertEquals(true, flow["b"])
-        assertEquals(false, flow["c"])
+    fun `test calls inside represented structures are not marked`() {
+        for (body in listOf(
+            "if (cond()) { a(); } else { b(); }",
+            "for (int i = 0; i < items.size(); i++) { a(); }",
+            "switch (items.size()) { case 1: a(); break; default: b(); }",
+            "try { a(); } catch (RuntimeException e) { b(); } finally { c(); }",
+            "int n = cond() ? one() : two();",
+        )) {
+            val flow = javaFlow(body)
+            assertTrue(
+                "no call in `$body` should carry the marker: the structure says it",
+                flow.values.none { it },
+            )
+        }
     }
 
-    fun `test java loop body is conditional while the loop header is not`() {
-        val flow = javaFlow("for (int i = 0; i < items.size(); i++) { a(); } b();")
-        assertEquals(false, flow["size"])
-        assertEquals(true, flow["a"])
-        assertEquals(false, flow["b"])
-    }
-
-    fun `test java catch section is conditional while try and finally are not`() {
-        val flow = javaFlow("try { a(); } catch (RuntimeException e) { b(); } finally { c(); } d();")
-        assertEquals(false, flow["a"])
-        assertEquals(true, flow["b"])
-        assertEquals(false, flow["c"])
-        assertEquals(false, flow["d"])
-    }
-
-    fun `test java short circuit right operand is conditional`() {
-        val flow = javaFlow("boolean x = cond() && cond2(); a();")
-        assertEquals(false, flow["cond"])
-        assertEquals(true, flow["cond2"])
-        assertEquals(false, flow["a"])
-    }
-
-    fun `test java switch body is conditional`() {
-        val flow = javaFlow("switch (items.size()) { case 1: a(); break; default: b(); } c();")
-        assertEquals(false, flow["size"])
-        assertEquals(true, flow["a"])
-        assertEquals(true, flow["b"])
-        assertEquals(false, flow["c"])
-    }
-
-    fun `test java ternary branches are conditional`() {
-        val flow = javaFlow("int n = cond() ? one() : two(); a();")
-        assertEquals(false, flow["cond"])
-        assertEquals(true, flow["one"])
-        assertEquals(true, flow["two"])
-        assertEquals(false, flow["a"])
-    }
-
-    fun `test kotlin when and elvis style branches are conditional`() {
+    fun `test kotlin calls inside represented structures are not marked`() {
         val file = myFixture.configureByText(
             "sample.kt",
             """
@@ -93,26 +67,23 @@ class ConditionalCallTest : LightJavaCodeInsightFixtureTestCase() {
                 }
                 if (flag) c()
                 while (cond()) { d() }
-                e()
+                try { e() } catch (t: Throwable) { f() }
             }
             fun subject(): Int = 1
             fun cond(): Boolean = false
-            fun a() {} fun b() {} fun c() {} fun d() {} fun e() {}
+            fun a() {} fun b() {} fun c() {} fun d() {} fun e() {} fun f() {}
             """.trimIndent(),
         )
         val fn = PsiTreeUtil.findChildrenOfType(file, KtNamedFunction::class.java).first { it.name == "run" }
-        val flow = KotlinFlowAnalyzer().extractDirectFlow(fn).calls
-            .associate { it.calleeShortName to it.conditional }
-        assertEquals(false, flow["subject"])
-        assertEquals(true, flow["a"])
-        assertEquals(true, flow["b"])
-        assertEquals(true, flow["c"])
-        assertEquals(false, flow["cond"])
-        assertEquals(true, flow["d"])
-        assertEquals(false, flow["e"])
+        val extraction = KotlinFlowAnalyzer().extractDirectFlow(fn)
+        assertTrue(extraction.calls.none { it.conditional })
+        assertFalse(
+            "when, if, while and try are all represented now",
+            extraction.controlFlowSimplified,
+        )
     }
 
-    fun `test go branches and loop bodies are conditional`() {
+    fun `test go calls inside represented structures are not marked`() {
         val file = myFixture.configureByText(
             "sample.go",
             """
@@ -146,21 +117,15 @@ class ConditionalCallTest : LightJavaCodeInsightFixtureTestCase() {
         )
         val fn = PsiTreeUtil.findChildrenOfType(file, GoFunctionOrMethodDeclaration::class.java)
             .first { it.name == "run" }
-        val calls = GoFlowAnalyzer().extractDirectFlow(fn).calls
+        val extraction = GoFlowAnalyzer().extractDirectFlow(fn)
         // Regression: Go PSI getters return nested elements, so an identity-based
         // split walked the if condition twice and emitted it as two call events.
         assertEquals(
             listOf("cond", "a", "b", "c", "subject", "d", "e"),
-            calls.map { it.calleeShortName },
+            extraction.calls.map { it.calleeShortName },
         )
-        val flow = calls.associate { it.calleeShortName to it.conditional }
-        assertEquals(false, flow["cond"])
-        assertEquals(true, flow["a"])
-        assertEquals(true, flow["b"])
-        assertEquals(true, flow["c"])
-        assertEquals(false, flow["subject"])
-        assertEquals(true, flow["d"])
-        assertEquals(false, flow["e"])
+        assertTrue(extraction.calls.none { it.conditional })
+        assertFalse(extraction.controlFlowSimplified)
     }
 
     fun `test kotlin loop bodies are extracted exactly once`() {
@@ -186,19 +151,11 @@ class ConditionalCallTest : LightJavaCodeInsightFixtureTestCase() {
             listOf("cond", "d", "e", "f", "cond2"),
             calls.map { it.calleeShortName },
         )
-        val flow = calls.associate { it.calleeShortName to it.conditional }
-        assertEquals("a while condition always runs at least once", false, flow["cond"])
-        assertEquals(true, flow["d"])
-        assertEquals(true, flow["e"])
-        assertEquals("a do-while body always runs once", false, flow["f"])
-        assertEquals(false, flow["cond2"])
     }
 
-    fun `test java do while body and condition always run`() {
+    fun `test java do while body and condition are inside one container`() {
         val flow = javaFlow("do { a(); } while (cond()); b();")
-        assertEquals(false, flow["a"])
-        assertEquals(false, flow["cond"])
-        assertEquals(false, flow["b"])
+        assertTrue("a loop container carries the repetition, not the marker", flow.values.none { it })
     }
 
     fun `test go while style loop condition always runs`() {
@@ -223,10 +180,7 @@ class ConditionalCallTest : LightJavaCodeInsightFixtureTestCase() {
             .first { it.name == "run" }
         val calls = GoFlowAnalyzer().extractDirectFlow(fn).calls
         assertEquals(listOf("cond", "a", "b"), calls.map { it.calleeShortName })
-        val flow = calls.associate { it.calleeShortName to it.conditional }
-        assertEquals("a for-condition runs at least once", false, flow["cond"])
-        assertEquals(true, flow["a"])
-        assertEquals(false, flow["b"])
+        assertTrue(calls.none { it.conditional })
     }
 
     fun `test kotlin elvis and safe calls are conditional`() {

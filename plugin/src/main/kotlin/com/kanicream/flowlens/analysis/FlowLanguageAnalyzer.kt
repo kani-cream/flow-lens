@@ -3,6 +3,7 @@ package com.kanicream.flowlens.analysis
 import com.intellij.openapi.extensions.ExtensionPointName
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
+import com.kanicream.flowlens.core.model.BranchKind
 import com.kanicream.flowlens.core.model.DispatchConfidence
 import com.kanicream.flowlens.core.model.ExecutionMode
 import com.kanicream.flowlens.core.model.FlowNodeKind
@@ -12,8 +13,43 @@ import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.core.model.SourceOrigin
 
 /**
+ * One item of a callable body in language evaluation order: a call, a control
+ * structure that owns branches, or a terminator. PSI stays in the plugin layer;
+ * the run engine converts these to the neutral model.
+ */
+sealed interface FlowItem
+
+/**
+ * A control structure — condition, switch, loop, or try — with its labelled
+ * sections (`V0.2_SPEC.md` §3). Code evaluated before entering the structure is
+ * emitted as ordinary items before it, not inside it.
+ */
+class ExtractedStructure(
+    val kind: FlowNodeKind,
+    /** The element the structure navigates to. */
+    val anchor: PsiElement,
+    /** Short source text describing the structure, already summarized. */
+    val summary: String?,
+    val branches: List<ExtractedBranch>,
+    /** Extra facts for the renderer, such as a body that runs at least once. */
+    val metadata: Map<String, String> = emptyMap(),
+) : FlowItem
+
+/** One labelled section of an [ExtractedStructure]. */
+class ExtractedBranch(
+    val kind: BranchKind,
+    val label: String?,
+    val items: List<FlowItem>,
+)
+
+/** A `return` or `throw`: the point where this path stops. */
+class ExtractedTerminator(
+    val kind: FlowNodeKind,
+    val anchor: PsiElement,
+) : FlowItem
+
+/**
  * One explicit call discovered inside a callable body, in language evaluation order.
- * PSI stays in the plugin layer; the run engine converts elements to the neutral model.
  */
 class ExtractedCall(
     val callSite: PsiElement,
@@ -28,13 +64,29 @@ class ExtractedCall(
      * avoid drawing a connector that claims a proven path (`V0.1_SPEC.md` §13).
      */
     val conditional: Boolean = false,
-)
+) : FlowItem
 
 /** The ordered direct flow of one callable body. */
 class DirectFlowExtraction(
-    val calls: List<ExtractedCall>,
+    val items: List<FlowItem>,
+    /**
+     * True only when the body contains control flow this analyzer did not
+     * represent — a short-circuit operand, a `break`, a fall-through
+     * (`V0.2_SPEC.md` §6). Represented structures do not set it.
+     */
     val controlFlowSimplified: Boolean,
-)
+) {
+    /** Every call in the body, structures included, in evaluation order. */
+    val calls: List<ExtractedCall> get() = flatten(items)
+
+    private fun flatten(items: List<FlowItem>): List<ExtractedCall> = items.flatMap { item ->
+        when (item) {
+            is ExtractedCall -> listOf(item)
+            is ExtractedStructure -> item.branches.flatMap { flatten(it.items) }
+            is ExtractedTerminator -> emptyList()
+        }
+    }
+}
 
 /** Resolution outcome for one call site. */
 class ResolvedCallTarget(

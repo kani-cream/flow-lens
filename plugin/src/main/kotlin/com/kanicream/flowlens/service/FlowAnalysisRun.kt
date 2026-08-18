@@ -14,8 +14,16 @@ import com.kanicream.flowlens.core.engine.FlowModelBuilder
 import com.kanicream.flowlens.core.engine.PendingFrame
 import com.kanicream.flowlens.core.engine.PendingFrameQueue
 import com.kanicream.flowlens.core.engine.TargetFacts
+import com.kanicream.flowlens.core.engine.StructureSpec
 import com.kanicream.flowlens.core.engine.TraversalPolicy
+import com.kanicream.flowlens.analysis.ExtractedCall
+import com.kanicream.flowlens.analysis.ExtractedStructure
+import com.kanicream.flowlens.analysis.ExtractedTerminator
+import com.kanicream.flowlens.analysis.FlowItem
+import com.kanicream.flowlens.core.model.BranchKind
 import com.kanicream.flowlens.core.model.DispatchConfidence
+import com.kanicream.flowlens.core.model.ExecutionMode
+import com.kanicream.flowlens.core.model.OrderingStatus
 import com.kanicream.flowlens.core.model.FlowDiagnostic
 import com.kanicream.flowlens.core.model.FlowDiagnosticSeverity
 import com.kanicream.flowlens.core.model.FlowLimits
@@ -163,13 +171,15 @@ internal class FlowAnalysisRun(
                     }
                     is FrameComputation.Computed -> {
                         if (computation.controlFlowSimplified) modelBuilder.controlFlowIncomplete = true
-                        for (call in computation.calls) {
-                            if (!appendCall(modelBuilder, queue, task, call)) {
-                                truncated = true
-                                break@frames
-                            }
-                        }
+                        val complete = appendItems(modelBuilder, queue, task, computation.items)
+                        // A structure left open by truncation still keeps what it
+                        // collected before the budget ran out.
+                        modelBuilder.closeOpenStructures()
                         modelBuilder.markFrameComplete(task.frameId)
+                        if (!complete) {
+                            truncated = true
+                            break@frames
+                        }
                     }
                 }
                 framesAnalyzed += 1
@@ -222,6 +232,75 @@ internal class FlowAnalysisRun(
             }
             progress(FlowProgressStage.FAILED)
         }
+    }
+
+    /**
+     * Appends computed items in order, opening a container for each structure so
+     * its branches nest. Returns false when the node budget forced truncation.
+     */
+    private fun appendItems(
+        builder: FlowModelBuilder,
+        queue: PendingFrameQueue,
+        task: PendingFrame,
+        items: List<ComputedItem>,
+    ): Boolean {
+        for (item in items) {
+            val complete = when (item) {
+                is ComputedCall -> appendCall(builder, queue, task, item)
+                is ComputedTerminator -> appendTerminator(builder, task, item)
+                is ComputedStructure -> appendStructure(builder, queue, task, item)
+            }
+            if (!complete) return false
+        }
+        return true
+    }
+
+    private fun appendTerminator(
+        builder: FlowModelBuilder,
+        task: PendingFrame,
+        terminator: ComputedTerminator,
+    ): Boolean {
+        val added = builder.addEvent(
+            task.frameId,
+            FlowEventSpec(
+                kind = terminator.kind,
+                callSiteLocation = terminator.location,
+                targetSymbol = null,
+                resolutionStatus = null,
+                dispatchConfidence = null,
+                executionMode = ExecutionMode.SYNC,
+                orderingStatus = OrderingStatus.DETERMINISTIC,
+            ),
+        )
+        nodesProduced = builder.nodeCount
+        if (added != null) return true
+        builder.addLimitEvent(task.frameId)
+        nodesProduced = builder.nodeCount
+        return false
+    }
+
+    private fun appendStructure(
+        builder: FlowModelBuilder,
+        queue: PendingFrameQueue,
+        task: PendingFrame,
+        structure: ComputedStructure,
+    ): Boolean {
+        val handle = builder.openStructure(
+            task.frameId,
+            StructureSpec(structure.kind, structure.location, structure.summary),
+        )
+        nodesProduced = builder.nodeCount
+        if (handle == null) {
+            builder.addLimitEvent(task.frameId)
+            nodesProduced = builder.nodeCount
+            return false
+        }
+        for (branch in structure.branches) {
+            builder.openBranch(handle, branch.kind, branch.label)
+            if (!appendItems(builder, queue, task, branch.items)) return false
+        }
+        builder.closeStructure(handle)
+        return true
     }
 
     /** Appends one computed call. Returns false when the node budget forced truncation. */
@@ -292,10 +371,12 @@ internal class FlowAnalysisRun(
         object Stale : FrameComputation
         object Invalid : FrameComputation
         class Computed(
-            val calls: List<ComputedCall>,
+            val items: List<ComputedItem>,
             val controlFlowSimplified: Boolean,
         ) : FrameComputation
     }
+
+    private sealed interface ComputedItem
 
     private class ComputedCall(
         val spec: FlowEventSpec,
@@ -303,6 +384,25 @@ internal class FlowAnalysisRun(
         val cycleKey: String?,
         val childSymbol: FlowSymbol?,
         val childEntryLocation: FlowLocation?,
+    ) : ComputedItem
+
+    private class ComputedTerminator(
+        val kind: FlowNodeKind,
+        val location: FlowLocation?,
+    ) : ComputedItem
+
+    private class ComputedStructure(
+        val kind: FlowNodeKind,
+        val location: FlowLocation?,
+        val summary: String?,
+        val branches: List<ComputedBranch>,
+        val metadata: Map<String, String>,
+    ) : ComputedItem
+
+    private class ComputedBranch(
+        val kind: BranchKind,
+        val label: String?,
+        val items: List<ComputedItem>,
     )
 
     /** Runs inside a read action. */
@@ -331,9 +431,43 @@ internal class FlowAnalysisRun(
             ?: return FrameComputation.Invalid
 
         val extraction = analyzer.extractDirectFlow(callable)
-        val calls = extraction.calls.map { extracted ->
+        return FrameComputation.Computed(
+            computeItems(analyzer, extraction.items),
+            extraction.controlFlowSimplified,
+        )
+    }
+
+    /** Runs inside the frame's read action; mirrors the extracted tree. */
+    private fun computeItems(
+        analyzer: com.kanicream.flowlens.analysis.FlowLanguageAnalyzer,
+        items: List<FlowItem>,
+    ): List<ComputedItem> = items.map { item ->
+        when (item) {
+            is ExtractedStructure -> ComputedStructure(
+                kind = item.kind,
+                location = handles.locationOf(item.anchor),
+                summary = item.summary,
+                branches = item.branches.map { branch ->
+                    ComputedBranch(branch.kind, branch.label, computeItems(analyzer, branch.items))
+                },
+                metadata = item.metadata,
+            )
+            is ExtractedTerminator -> ComputedTerminator(
+                kind = item.kind,
+                location = handles.locationOf(item.anchor),
+            )
+            is ExtractedCall -> computeCall(analyzer, item)
+        }
+    }
+
+    private fun computeCall(
+        analyzer: com.kanicream.flowlens.analysis.FlowLanguageAnalyzer,
+        extracted: ExtractedCall,
+    ): ComputedCall {
+        return run {
+            val call = extracted
             val target = try {
-                analyzer.resolveCall(extracted)
+                analyzer.resolveCall(call)
             } catch (e: ProcessCanceledException) {
                 throw e
             } catch (e: Exception) {
@@ -343,7 +477,7 @@ internal class FlowAnalysisRun(
             val metadata = buildMap {
                 put(FlowMetadata.ORIGIN, target.sourceOrigin.name)
                 if (target.inTestSource) put(FlowMetadata.TEST_SOURCE, "true")
-                if (extracted.conditional) put(FlowMetadata.CONDITIONAL, "true")
+                if (call.conditional) put(FlowMetadata.CONDITIONAL, "true")
             }
             val recursable = TraversalPolicy.mayEnterBody(
                 TargetFacts(
@@ -355,13 +489,13 @@ internal class FlowAnalysisRun(
                 ),
                 limits,
             )
-            val symbol = target.symbol ?: fallbackSymbol(analyzer.languageId, extracted.calleeShortName)
+            val symbol = target.symbol ?: fallbackSymbol(analyzer.languageId, call.calleeShortName)
             ComputedCall(
                 spec = FlowEventSpec(
-                    kind = if (target.isConstructor) FlowNodeKind.CONSTRUCTOR else extracted.kind,
-                    callSiteLocation = handles.locationOf(extracted.callSite),
+                    kind = if (target.isConstructor) FlowNodeKind.CONSTRUCTOR else call.kind,
+                    callSiteLocation = handles.locationOf(call.callSite),
                     targetSymbol = if (target.resolutionStatus == ResolutionStatus.UNRESOLVED) {
-                        fallbackSymbol(analyzer.languageId, extracted.calleeShortName)
+                        fallbackSymbol(analyzer.languageId, call.calleeShortName)
                     } else {
                         symbol
                     },
@@ -370,8 +504,8 @@ internal class FlowAnalysisRun(
                         ?.let { handles.locationOf(it) },
                     resolutionStatus = target.resolutionStatus,
                     dispatchConfidence = target.dispatchConfidence,
-                    executionMode = extracted.executionMode,
-                    orderingStatus = extracted.orderingStatus,
+                    executionMode = call.executionMode,
+                    orderingStatus = call.orderingStatus,
                     metadata = metadata,
                 ),
                 recursable = recursable,
@@ -384,7 +518,6 @@ internal class FlowAnalysisRun(
                 },
             )
         }
-        return FrameComputation.Computed(calls, extraction.controlFlowSimplified)
     }
 
     private fun fallbackSymbol(languageId: String, shortName: String): FlowSymbol =

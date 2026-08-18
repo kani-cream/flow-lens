@@ -19,4 +19,10 @@ object FlowMetadata {
      * that would claim a proven path (`V0.1_SPEC.md` §13).
      */
     const val CONDITIONAL = "flowlens.conditional"
+
+    /** Present ("true") on a loop whose body is guaranteed one execution. */
+    const val LOOP_RUNS_AT_LEAST_ONCE = "flowlens.loopRunsAtLeastOnce"
+
+    /** Present ("true") on a Go `select`, which chooses among communications. */
+    const val SELECT = "flowlens.select"
 }

@@ -265,14 +265,14 @@ class KotlinFlowAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(listOf("listOf", "map"), callNames(extraction))
     }
 
-    fun `test calls inside if mark control flow simplified`() {
+    fun `test an if is represented rather than reported as simplified`() {
         val extraction = extractionOf(
             """
             fun run(flag: Boolean) { if (flag) helper() }
             fun helper() { }
             """.trimIndent(),
         )
-        assertTrue(extraction.controlFlowSimplified)
+        assertFalse("v0.2 represents the branch itself", extraction.controlFlowSimplified)
         assertEquals(listOf("helper"), callNames(extraction))
     }
 

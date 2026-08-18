@@ -2,7 +2,10 @@ package com.kanicream.flowlens.analysis.go
 
 import com.goide.psi.GoAndExpr
 import com.goide.psi.GoBinaryExpr
+import com.goide.psi.GoBreakStatement
 import com.goide.psi.GoCaseClause
+import com.goide.psi.GoContinueStatement
+import com.goide.psi.GoReturnStatement
 import com.goide.psi.GoCallExpr
 import com.goide.psi.GoOrExpr
 import com.goide.psi.GoDeferStatement
@@ -22,17 +25,24 @@ import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.util.PsiTreeUtil
 import com.kanicream.flowlens.analysis.DirectFlowExtraction
+import com.kanicream.flowlens.analysis.ExtractedBranch
 import com.kanicream.flowlens.analysis.ExtractedCall
+import com.kanicream.flowlens.analysis.ExtractedStructure
+import com.kanicream.flowlens.analysis.ExtractedTerminator
+import com.kanicream.flowlens.analysis.FlowItem
+import com.kanicream.flowlens.analysis.SourceSummary
 import com.kanicream.flowlens.analysis.FlowLanguageAnalyzer
 import com.kanicream.flowlens.analysis.PsiClassification
 import com.kanicream.flowlens.analysis.ResolvedCallTarget
 import com.kanicream.flowlens.analysis.TargetClassifier
+import com.kanicream.flowlens.core.model.BranchKind
 import com.kanicream.flowlens.core.model.DispatchConfidence
 import com.kanicream.flowlens.core.model.ExecutionMode
 import com.kanicream.flowlens.core.model.FlowNodeKind
 import com.kanicream.flowlens.core.model.FlowSymbol
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.core.model.SourceOrigin
+import com.kanicream.flowlens.service.FlowMetadata
 
 /**
  * Go analyzer: package functions, receiver methods, and ordinary calls.
@@ -74,7 +84,7 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
         val declaration = callable as GoFunctionOrMethodDeclaration
         val extractor = Extractor()
         declaration.block?.let(extractor::walk)
-        return DirectFlowExtraction(extractor.calls, extractor.controlFlowSimplified)
+        return DirectFlowExtraction(extractor.items(), extractor.controlFlowSimplified)
     }
 
     override fun resolveCall(call: ExtractedCall): ResolvedCallTarget {
@@ -128,13 +138,21 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
         )
     }
 
-    /** Post-order walk producing Go evaluation order; function literals are boundaries. */
+    /**
+     * Walks a body in Go evaluation order, emitting calls, control structures
+     * with their branches, and terminators. Function literals are boundaries.
+     */
     private class Extractor {
-        val calls = mutableListOf<ExtractedCall>()
-        var controlFlowSimplified = false
+        private val root = mutableListOf<FlowItem>()
+        private var sink: MutableList<FlowItem> = root
 
-        /** > 0 while walking code that may not execute (branch, loop body, case). */
+        var controlFlowSimplified = false
+            private set
+
+        /** > 0 while walking a short-circuit operand, which has no structure. */
         private var conditionalDepth = 0
+
+        fun items(): List<FlowItem> = root.toList()
 
         fun walk(element: PsiElement) {
             when (element) {
@@ -144,7 +162,7 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                 is GoCallExpr -> {
                     element.expression?.let(::walk)
                     element.argumentList.expressionList.forEach(::walk)
-                    calls += ExtractedCall(
+                    sink += ExtractedCall(
                         callSite = element,
                         kind = FlowNodeKind.CALL,
                         calleeShortName = calleeNameOf(element),
@@ -152,33 +170,17 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                         conditional = conditionalDepth > 0,
                     )
                 }
-                is GoIfStatement -> {
-                    controlFlowSimplified = true
-                    // Init statement and condition always run; the branches may not.
-                    val header = listOfNotNull(element.initStatement, element.condition)
-                    walkSplit(element) { child -> containsAny(child, header) }
+                is GoIfStatement -> walkIf(element)
+                is GoForStatement -> walkLoop(element)
+                is GoSwitchStatement -> walkSwitch(element, isSelect = false)
+                is GoSelectStatement -> walkSwitch(element, isSelect = true)
+                is GoReturnStatement -> {
+                    element.expressionList.forEach(::walk)
+                    sink += ExtractedTerminator(FlowNodeKind.RETURN, element)
                 }
-                is GoForStatement -> {
-                    controlFlowSimplified = true
-                    // The clause and the while-style condition run; only the body
-                    // may execute zero times. `for cond() { }` exposes its condition
-                    // through getExpression(), not through a for/range clause.
-                    val header = listOfNotNull(
-                        element.forClause,
-                        element.rangeClause,
-                        element.expression,
-                    )
-                    walkSplit(element) { child -> containsAny(child, header) }
-                }
-                is GoSwitchStatement, is GoSelectStatement -> {
-                    controlFlowSimplified = true
-                    // The header (subject expression, init statement) always runs;
-                    // only the case/comm clauses are selected at runtime.
-                    walkSplit(element) { child -> child !is GoCaseClause }
-                }
+                is GoBreakStatement, is GoContinueStatement -> controlFlowSimplified = true
                 is GoAndExpr, is GoOrExpr -> {
                     controlFlowSimplified = true
-                    // Short-circuit: the right operand may never be evaluated.
                     val binary = element as GoBinaryExpr
                     binary.left?.let(::walk)
                     conditional { binary.right?.let(::walk) }
@@ -187,24 +189,91 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
             }
         }
 
-        /**
-         * Walks every direct child exactly once, in source order; children for
-         * which [alwaysRuns] is false are walked as conditional code.
-         *
-         * Splitting by direct child (rather than by walking getter results
-         * directly) keeps each subtree visited once: Go PSI getters such as
-         * `GoIfStatement.getCondition()` return a nested element, so walking both
-         * the getter result and the children would emit the condition's calls twice.
-         */
-        private inline fun walkSplit(element: PsiElement, alwaysRuns: (PsiElement) -> Boolean) {
-            for (child in element.children) {
-                if (alwaysRuns(child)) walk(child) else conditional { walk(child) }
+        private fun walkIf(element: GoIfStatement) {
+            // The init statement and the condition both run before the branches.
+            val header = listOfNotNull(element.initStatement, element.condition)
+            header.forEach(::walk)
+            val branches = mutableListOf<ExtractedBranch>()
+            val elseStatement = element.elseStatement
+            branches += branch(BranchKind.THEN, null) {
+                element.children
+                    .filterNot { child -> containsAny(child, header) || child === elseStatement }
+                    .forEach(::walk)
             }
+            elseStatement?.let { branches += branch(BranchKind.ELSE, null) { walk(it) } }
+            sink += ExtractedStructure(
+                kind = FlowNodeKind.CONDITION,
+                anchor = element,
+                summary = SourceSummary.of(element.condition?.text),
+                branches = branches,
+            )
         }
 
-        /** True when [child] is, or contains, any of [parts]. */
+        private fun walkLoop(element: GoForStatement) {
+            val body = branch(BranchKind.BODY, null) { element.children.forEach(::walk) }
+            sink += ExtractedStructure(
+                kind = FlowNodeKind.LOOP,
+                anchor = element,
+                summary = SourceSummary.of(
+                    element.forClause?.text ?: element.rangeClause?.text ?: element.expression?.text,
+                ),
+                branches = listOf(body),
+            )
+        }
+
+        private fun walkSwitch(element: PsiElement, isSelect: Boolean) {
+            // Everything outside the clauses — the subject, an init statement —
+            // runs before a case is chosen.
+            val clauses = element.children.filterIsInstance<GoCaseClause>()
+            element.children.filterNot { it is GoCaseClause }.forEach(::walk)
+            val branches = clauses.map { clause ->
+                val isDefault = clause.default != null
+                branch(
+                    if (isDefault) BranchKind.DEFAULT else BranchKind.CASE,
+                    if (isDefault) null else SourceSummary.of(caseLabelOf(clause)),
+                ) { clause.statementList.forEach(::walk) }
+            }
+            sink += ExtractedStructure(
+                kind = FlowNodeKind.SWITCH,
+                anchor = element,
+                summary = SourceSummary.of(switchSubjectOf(element)),
+                branches = branches,
+                metadata = if (isSelect) mapOf(FlowMetadata.SELECT to "true") else emptyMap(),
+            )
+        }
+
+        private fun caseLabelOf(clause: GoCaseClause): String? {
+            val text = clause.text.substringBefore(':').trim()
+            return text.removePrefix("case").trim().ifEmpty { null }
+        }
+
+        private fun switchSubjectOf(element: PsiElement): String? = element.children
+            .filterNot { it is GoCaseClause }
+            .joinToString(" ") { it.text }
+            .trim()
+            .removePrefix("switch")
+            .removePrefix("select")
+            .trim()
+            .ifEmpty { null }
+
         private fun containsAny(child: PsiElement, parts: List<PsiElement>): Boolean =
             parts.any { PsiTreeUtil.isAncestor(child, it, false) }
+
+        private inline fun branch(
+            kind: BranchKind,
+            label: String?,
+            collect: () -> Unit,
+        ): ExtractedBranch {
+            val previous = sink
+            val collected = mutableListOf<FlowItem>()
+            sink = collected
+            try {
+                collect()
+            } finally {
+                sink = previous
+            }
+            return ExtractedBranch(kind, label, collected.toList())
+        }
 
         private inline fun conditional(block: () -> Unit) {
             conditionalDepth += 1

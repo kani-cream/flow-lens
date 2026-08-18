@@ -6,16 +6,23 @@ import com.intellij.psi.PsiMethod
 import com.intellij.psi.PsiNamedElement
 import com.intellij.psi.util.PsiTreeUtil
 import com.kanicream.flowlens.analysis.DirectFlowExtraction
+import com.kanicream.flowlens.analysis.ExtractedBranch
 import com.kanicream.flowlens.analysis.ExtractedCall
+import com.kanicream.flowlens.analysis.ExtractedStructure
+import com.kanicream.flowlens.analysis.ExtractedTerminator
+import com.kanicream.flowlens.analysis.FlowItem
+import com.kanicream.flowlens.analysis.SourceSummary
 import com.kanicream.flowlens.analysis.FlowLanguageAnalyzer
 import com.kanicream.flowlens.analysis.PsiClassification
 import com.kanicream.flowlens.analysis.ResolvedCallTarget
 import com.kanicream.flowlens.analysis.TargetClassifier
+import com.kanicream.flowlens.core.model.BranchKind
 import com.kanicream.flowlens.core.model.DispatchConfidence
 import com.kanicream.flowlens.core.model.FlowNodeKind
 import com.kanicream.flowlens.core.model.FlowSymbol
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.core.model.SourceOrigin
+import com.kanicream.flowlens.service.FlowMetadata
 import org.jetbrains.kotlin.idea.KotlinLanguage
 import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.lexer.KtTokens
@@ -24,7 +31,13 @@ import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtClass
 import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtConstructor
+import org.jetbrains.kotlin.psi.KtBreakExpression
+import org.jetbrains.kotlin.psi.KtContinueExpression
 import org.jetbrains.kotlin.psi.KtDoWhileExpression
+import org.jetbrains.kotlin.psi.KtForExpression
+import org.jetbrains.kotlin.psi.KtReturnExpression
+import org.jetbrains.kotlin.psi.KtThrowExpression
+import org.jetbrains.kotlin.psi.KtWhileExpression
 import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
 import org.jetbrains.kotlin.psi.KtSuperExpression
 import org.jetbrains.kotlin.psi.KtIfExpression
@@ -84,7 +97,7 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                 ?: callable.bodyExpression?.let(extractor::walk)
             is KtSecondaryConstructor -> callable.bodyExpression?.let(extractor::walk)
         }
-        return DirectFlowExtraction(extractor.calls, extractor.controlFlowSimplified)
+        return DirectFlowExtraction(extractor.items(), extractor.controlFlowSimplified)
     }
 
     override fun resolveCall(call: ExtractedCall): ResolvedCallTarget {
@@ -223,13 +236,22 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
         )
     }
 
-    /** Post-order walk producing evaluation order; lambda/class/local-fn bodies are boundaries. */
+    /**
+     * Walks a body in evaluation order, emitting calls, control structures with
+     * their branches, and terminators. Lambda, object-literal, nested function,
+     * and class bodies are traversal boundaries.
+     */
     private class Extractor {
-        val calls = mutableListOf<ExtractedCall>()
-        var controlFlowSimplified = false
+        private val root = mutableListOf<FlowItem>()
+        private var sink: MutableList<FlowItem> = root
 
-        /** > 0 while walking code that may not execute (branch, loop body, catch). */
+        var controlFlowSimplified = false
+            private set
+
+        /** > 0 while walking an operand that short-circuits and has no structure. */
         private var conditionalDepth = 0
+
+        fun items(): List<FlowItem> = root.toList()
 
         fun walk(element: PsiElement) {
             when (element) {
@@ -237,12 +259,10 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                 is KtLambdaExpression, is KtObjectLiteralExpression -> return
                 is KtNamedFunction, is KtClassOrObject -> return
                 is KtCallExpression -> {
-                    // The qualifier chain (receiver) is walked by the enclosing
-                    // KtQualifiedExpression before this call is reached.
                     element.valueArguments.forEach { arg ->
                         arg.getArgumentExpression()?.let(::walk)
                     }
-                    calls += ExtractedCall(
+                    sink += ExtractedCall(
                         callSite = element,
                         kind = FlowNodeKind.CALL,
                         calleeShortName = (element.calleeExpression as? KtNameReferenceExpression)
@@ -250,61 +270,151 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                         conditional = conditionalDepth > 0,
                     )
                 }
-                is KtIfExpression -> {
-                    controlFlowSimplified = true
-                    element.condition?.let(::walk)
-                    conditional { element.then?.let(::walk); element.`else`?.let(::walk) }
+                is KtIfExpression -> walkIf(element)
+                is KtWhenExpression -> walkWhen(element)
+                is KtDoWhileExpression -> walkLoop(element, runsAtLeastOnce = true)
+                is KtLoopExpression -> walkLoop(element, runsAtLeastOnce = false)
+                is KtTryExpression -> walkTry(element)
+                is KtReturnExpression -> {
+                    element.returnedExpression?.let(::walk)
+                    sink += ExtractedTerminator(FlowNodeKind.RETURN, element)
                 }
-                is KtWhenExpression -> {
-                    controlFlowSimplified = true
-                    element.subjectExpression?.let(::walk)
-                    conditional { element.entries.forEach(::walk) }
+                is KtThrowExpression -> {
+                    element.thrownExpression?.let(::walk)
+                    sink += ExtractedTerminator(FlowNodeKind.THROW, element)
                 }
-                is KtDoWhileExpression -> {
-                    controlFlowSimplified = true
-                    // A do-while body and its condition both run at least once.
-                    element.children.forEach(::walk)
-                }
-                is KtLoopExpression -> {
-                    controlFlowSimplified = true
-                    // `KtLoopExpression.getBody()` returns the expression inside a
-                    // container node, so it is a grandchild: the body's owning child
-                    // must be found by containment. Comparing by identity would walk
-                    // the body twice and emit every call in it as two events.
-                    val body = element.body
-                    for (child in element.children) {
-                        val isBody = body != null && PsiTreeUtil.isAncestor(child, body, false)
-                        if (isBody) conditional { walk(child) } else walk(child)
-                    }
-                }
-                is KtTryExpression -> {
-                    controlFlowSimplified = true
-                    walk(element.tryBlock)
-                    conditional { element.catchClauses.forEach(::walk) }
-                    element.finallyBlock?.let(::walk)
-                }
-                is KtBinaryExpression -> {
-                    // `?:` short-circuits like `&&` and `||`: the right side runs
-                    // only when the left produced null.
-                    val shortCircuit = element.operationToken == KtTokens.ANDAND ||
-                        element.operationToken == KtTokens.OROR ||
-                        element.operationToken == KtTokens.ELVIS
-                    if (!shortCircuit) {
-                        element.children.forEach(::walk)
-                        return
-                    }
-                    controlFlowSimplified = true
-                    element.left?.let(::walk)
-                    conditional { element.right?.let(::walk) }
-                }
+                is KtBreakExpression, is KtContinueExpression -> controlFlowSimplified = true
                 is KtSafeQualifiedExpression -> {
-                    // `a?.f()` calls f only when the receiver is not null.
+                    // `a?.f()` runs f only when the receiver is not null; v0.2
+                    // marks it rather than giving it a structure.
                     controlFlowSimplified = true
-                    element.receiverExpression.let(::walk)
+                    walk(element.receiverExpression)
                     conditional { element.selectorExpression?.let(::walk) }
                 }
+                is KtBinaryExpression -> walkBinary(element)
                 else -> element.children.forEach(::walk)
             }
+        }
+
+        private fun walkIf(element: KtIfExpression) {
+            element.condition?.let(::walk)
+            val branches = mutableListOf<ExtractedBranch>()
+            branches += branch(BranchKind.THEN, null) { element.then?.let(::walk) }
+            element.`else`?.let { elseBranch ->
+                branches += branch(BranchKind.ELSE, null) { walk(elseBranch) }
+            }
+            sink += ExtractedStructure(
+                kind = FlowNodeKind.CONDITION,
+                anchor = element,
+                summary = SourceSummary.of(element.condition?.text),
+                branches = branches,
+            )
+        }
+
+        private fun walkWhen(element: KtWhenExpression) {
+            element.subjectExpression?.let(::walk)
+            val branches = element.entries.map { entry ->
+                branch(
+                    if (entry.isElse) BranchKind.DEFAULT else BranchKind.CASE,
+                    if (entry.isElse) {
+                        null
+                    } else {
+                        SourceSummary.of(entry.conditions.joinToString(", ") { it.text })
+                    },
+                ) { entry.expression?.let(::walk) }
+            }
+            sink += ExtractedStructure(
+                kind = FlowNodeKind.SWITCH,
+                anchor = element,
+                summary = SourceSummary.of(element.subjectExpression?.text),
+                branches = branches,
+            )
+        }
+
+        private fun walkLoop(element: KtLoopExpression, runsAtLeastOnce: Boolean) {
+            // A `for` iterates one sequence, evaluated once before the loop.
+            (element as? KtForExpression)?.loopRange?.let(::walk)
+            val body = branch(BranchKind.BODY, null) {
+                when (element) {
+                    is KtDoWhileExpression -> {
+                        element.body?.let(::walk)
+                        element.condition?.let(::walk)
+                    }
+                    is KtWhileExpression -> {
+                        element.condition?.let(::walk)
+                        element.body?.let(::walk)
+                    }
+                    else -> element.body?.let(::walk)
+                }
+            }
+            sink += ExtractedStructure(
+                kind = FlowNodeKind.LOOP,
+                anchor = element,
+                summary = SourceSummary.of(loopHeaderOf(element)),
+                branches = listOf(body),
+                metadata = if (runsAtLeastOnce) {
+                    mapOf(FlowMetadata.LOOP_RUNS_AT_LEAST_ONCE to "true")
+                } else {
+                    emptyMap()
+                },
+            )
+        }
+
+        private fun walkTry(element: KtTryExpression) {
+            val branches = mutableListOf<ExtractedBranch>()
+            branches += branch(BranchKind.TRY, null) { walk(element.tryBlock) }
+            for (clause in element.catchClauses) {
+                branches += branch(
+                    BranchKind.CATCH,
+                    SourceSummary.of(clause.catchParameter?.typeReference?.text),
+                ) { clause.catchBody?.let(::walk) }
+            }
+            element.finallyBlock?.let { finally ->
+                branches += branch(BranchKind.FINALLY, null) { walk(finally.finalExpression) }
+            }
+            sink += ExtractedStructure(
+                kind = FlowNodeKind.TRY,
+                anchor = element,
+                summary = null,
+                branches = branches,
+            )
+        }
+
+        private fun walkBinary(element: KtBinaryExpression) {
+            val shortCircuit = element.operationToken == KtTokens.ANDAND ||
+                element.operationToken == KtTokens.OROR ||
+                element.operationToken == KtTokens.ELVIS
+            if (!shortCircuit) {
+                element.children.forEach(::walk)
+                return
+            }
+            controlFlowSimplified = true
+            element.left?.let(::walk)
+            conditional { element.right?.let(::walk) }
+        }
+
+        private fun loopHeaderOf(element: KtLoopExpression): String? = when (element) {
+            is KtForExpression ->
+                "${element.loopParameter?.text.orEmpty()} in ${element.loopRange?.text.orEmpty()}"
+            is KtWhileExpression -> element.condition?.text
+            is KtDoWhileExpression -> element.condition?.text
+            else -> null
+        }
+
+        private inline fun branch(
+            kind: BranchKind,
+            label: String?,
+            collect: () -> Unit,
+        ): ExtractedBranch {
+            val previous = sink
+            val collected = mutableListOf<FlowItem>()
+            sink = collected
+            try {
+                collect()
+            } finally {
+                sink = previous
+            }
+            return ExtractedBranch(kind, label, collected.toList())
         }
 
         private inline fun conditional(block: () -> Unit) {
