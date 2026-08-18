@@ -23,6 +23,13 @@ object FlowMetadata {
     /** Present ("true") on a loop whose body is guaranteed one execution. */
     const val LOOP_RUNS_AT_LEAST_ONCE = "flowlens.loopRunsAtLeastOnce"
 
+    /**
+     * Present ("true") when the target has a body this plugin could analyze.
+     * Recorded during the run so "Analyze from Here" can be disabled without
+     * touching PSI on the EDT every time the menu updates.
+     */
+    const val ANALYZABLE = "flowlens.analyzable"
+
     /** Present ("true") on a Go `select`, which chooses among communications. */
     const val SELECT = "flowlens.select"
 }

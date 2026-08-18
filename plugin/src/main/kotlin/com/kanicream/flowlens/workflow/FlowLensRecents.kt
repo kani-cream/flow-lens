@@ -26,17 +26,21 @@ class FlowLensRecents : PersistentStateComponent<FlowLensRecents.State> {
         var recents: MutableList<SavedFlowState> = mutableListOf()
     }
 
+    // Written from the analysis coroutine, read from the EDT and from the
+    // platform's save thread; a plain field would let each of them see a stale
+    // list (guardrails §7).
+    private val lock = Any()
     private var state = State()
 
     var onChanged: () -> Unit = {}
 
-    override fun getState(): State = state
+    override fun getState(): State = synchronized(lock) { state }
 
     override fun loadState(state: State) {
-        this.state = state
+        synchronized(lock) { this.state = state }
     }
 
-    fun recents(): List<RecentFlow> = state.recents.mapNotNull { recent ->
+    fun recents(): List<RecentFlow> = synchronized(lock) { state.recents.toList() }.mapNotNull { recent ->
         val entry = recent.entry?.toRef() ?: return@mapNotNull null
         RecentFlow(
             entry = entry,
@@ -62,14 +66,16 @@ class FlowLensRecents : PersistentStateComponent<FlowLensRecents.State> {
             includeTests = limits.includeTests
             includeLibraries = limits.includeLibraries
         }
-        state.recents = (listOf(entry) + state.recents.filterNot { it.entry?.key == ref.key })
-            .take(MAX_RECENTS)
-            .toMutableList()
+        synchronized(lock) {
+            state.recents = (listOf(entry) + state.recents.filterNot { it.entry?.key == ref.key })
+                .take(MAX_RECENTS)
+                .toMutableList()
+        }
         onChanged()
     }
 
     fun clear() {
-        state.recents = mutableListOf()
+        synchronized(lock) { state.recents = mutableListOf() }
         onChanged()
     }
 

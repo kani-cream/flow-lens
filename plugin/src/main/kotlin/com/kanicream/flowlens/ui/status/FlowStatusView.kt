@@ -179,6 +179,11 @@ class FlowStatusView(
         state.rootTitle,
         state.headline,
         state.currentCallable,
+        state.budgetFraction?.let {
+            // Saying what the bar measures is the point: without it the bar reads
+            // as progress toward completion, which it is not (`V0.3_SPEC.md` §7.2).
+            FlowLensBundle.message("status.budget.used", (it * 100).toInt())
+        },
         state.counters,
         if (state.simplifiedControlFlow) {
             FlowLensBundle.message("status.control.flow.simplified")

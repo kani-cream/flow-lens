@@ -55,6 +55,9 @@ class FlowCanvas : JComponent() {
 
     /** Promote the selected call's target to the new root (`V0.3_SPEC.md` §6). */
     var onAnalyzeFromHere: (CardVM) -> Unit = {}
+
+    /** Whether that command has anything to do for a card. */
+    var canAnalyzeFrom: (CardVM) -> Boolean = { false }
     var onEntrySelected: () -> Unit = {}
 
     private var result: FlowAnalysisResult? = null
@@ -110,6 +113,15 @@ class FlowCanvas : JComponent() {
      * not visible and cannot be selected; the caller gets false.
      */
     fun selectNode(nodeId: NodeId): Boolean {
+        if (visibleCards.none { it.nodeId == nodeId }) {
+            // The node is inside a collapsed frame; open the frames on the way to
+            // it rather than failing silently.
+            val snapshot = result ?: return false
+            val path = CanvasViewModelBuilder.revealPath(snapshot, nodeId)
+            if (path.isEmpty()) return false
+            expandedNodes += path
+            rebuild()
+        }
         val card = visibleCards.firstOrNull { it.nodeId == nodeId } ?: return false
         select(card)
         scrollToCard(card)

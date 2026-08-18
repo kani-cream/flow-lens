@@ -191,6 +191,42 @@ class FlowEntryPersistenceTest : LightJavaCodeInsightFixtureTestCase() {
         )
     }
 
+    fun `test F stored state survives the serializer`() {
+        configure()
+        val ref = refFor("void charge(int amount)")
+        val flows = FlowLensFlows.getInstance(project)
+        flows.togglePin(ref)
+        flows.save("charge deeply", ref, FlowLimits(maxDepth = 4, maxNodes = 150))
+
+        // What a restart actually does: write the state out and read it back.
+        val written = com.intellij.configurationStore.serialize(flows.state!!)!!
+        val restored = com.intellij.util.xmlb.XmlSerializer
+            .deserialize(written, FlowLensFlows.State::class.java)
+        val reopened = FlowLensFlows().apply { loadState(restored) }
+
+        assertEquals(listOf(ref.key), reopened.pins().map { it.key })
+        val saved = reopened.savedFlows().single()
+        assertEquals("charge deeply", saved.name)
+        assertEquals(ref.path, saved.entry.path)
+        assertEquals(4, saved.limits.maxDepth)
+        assertEquals(150, saved.limits.maxNodes)
+    }
+
+    fun `test T stored state with no lists at all is still readable`() {
+        // An older version, a hand edit, or a partial write: the component must
+        // open the tool window rather than fail it.
+        val flows = FlowLensFlows()
+        val restored = com.intellij.util.xmlb.XmlSerializer.deserialize(
+            org.jdom.Element("state"),
+            FlowLensFlows.State::class.java,
+        )
+        flows.loadState(restored)
+
+        assertTrue(flows.pins().isEmpty())
+        assertTrue(flows.savedFlows().isEmpty())
+        assertFalse(flows.isPinned("anything"))
+    }
+
     fun `test T a malformed stored entry is dropped rather than failing`() {
         val flows = FlowLensFlows.getInstance(project)
         val state = FlowLensFlows.State().apply {

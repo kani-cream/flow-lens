@@ -13,6 +13,7 @@ import com.kanicream.flowlens.workflow.FlowLensFlows
 import com.kanicream.flowlens.workflow.FlowLensRecents
 import com.kanicream.flowlens.workflow.LaunchOutcome
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -33,10 +34,13 @@ class V03AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
 
     private val sample = """
         public class Orders {
-            void purchase() { save(); }
+            void purchase() { save(); helper.help(); "x".trim(); }
             void refund() { save(); }
             void save() { }
+            Helper helper = new Helper();
         }
+
+        interface Helper { void help(); }
     """.trimIndent()
 
     override fun setUp() {
@@ -148,7 +152,7 @@ class V03AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
         val result = analyze("void purchase()")
         flows.togglePin(entryRef(result))
 
-        val save = result.rootFrame!!.events.single()
+        val save = result.rootFrame!!.events.first { it.targetSymbol?.displayName == "save()" }
         assertFalse(
             "save() is not the pinned callable",
             flows.pinnedKeys().contains(save.targetSymbol!!.key),
@@ -161,9 +165,49 @@ class V03AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     fun `test O a run reports the callable it is working on`() {
+        val seen = mutableListOf<String>()
+        val collector = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default)
+            .launch {
+                service.progress.collect { it?.currentCallable?.let(seen::add) }
+            }
         analyze("void purchase()")
-        val progress = service.progress.value!!
-        assertTrue("the budget is published so the bar has a denominator", progress.nodeBudget > 0)
+        collector.cancel()
+
+        assertTrue(
+            "a run that looks stuck must be able to say what it is stuck on: $seen",
+            seen.contains("purchase()"),
+        )
+        assertTrue(
+            "the budget is published so the bar has a denominator",
+            service.progress.value!!.nodeBudget > 0,
+        )
+    }
+
+    fun `test M analyze from here promotes a project-local target`() {
+        val result = analyze("void purchase()")
+        val save = result.rootFrame!!.events.first { it.targetSymbol?.displayName == "save()" }
+        assertEquals(
+            "the run recorded that this target has a body worth analyzing",
+            "true",
+            save.metadata[FlowMetadata.ANALYZABLE],
+        )
+        assertNotNull(save.targetLocation)
+    }
+
+    fun `test N a target with nothing to analyze is not offered`() {
+        val result = analyze("void purchase()")
+        val events = result.rootFrame!!.events
+
+        val external = events.first { it.targetSymbol?.displayName == "trim()" }
+        assertNull(
+            "an external call offers nothing to analyze",
+            external.metadata[FlowMetadata.ANALYZABLE],
+        )
+        val abstract = events.first { it.targetSymbol?.displayName == "help()" }
+        assertNull(
+            "an interface method has no body, so promoting it would fail rather than analyze",
+            abstract.metadata[FlowMetadata.ANALYZABLE],
+        )
     }
 
     override fun tearDown() {

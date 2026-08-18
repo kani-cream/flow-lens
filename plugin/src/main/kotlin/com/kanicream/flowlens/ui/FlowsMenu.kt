@@ -7,12 +7,10 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
-import com.intellij.openapi.application.runReadActionBlocking
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.kanicream.flowlens.FlowLensBundle
 import com.kanicream.flowlens.core.model.FlowLimits
-import com.kanicream.flowlens.workflow.EntryResolution
 import com.kanicream.flowlens.workflow.FlowEntryRef
 import com.kanicream.flowlens.workflow.FlowEntryResolver
 import com.kanicream.flowlens.workflow.FlowLensFlows
@@ -47,24 +45,24 @@ class FlowsMenu(
         val pins = flows.pins()
         val recent = recents.recents()
 
-        // One read action for the whole menu: resolving each entry walks a file,
-        // and taking the lock per row would be both slower and inconsistent.
-        val resolvable = runReadActionBlocking {
-            (saved.map { it.entry } + pins + recent.map { it.entry })
-                .associate { it.key to (FlowEntryResolver.resolve(project, it) is EntryResolution.Found) }
-        }
+        // Only a VFS lookup here. Resolving a key parses the file and walks every
+        // element of it, and doing that for a dozen entries would freeze the EDT
+        // each time the menu opens (guardrails §6). The expensive check happens on
+        // activation, for the one entry the user chose.
+        val present = (saved.map { it.entry } + pins + recent.map { it.entry })
+            .associate { entryKey(it) to FlowEntryResolver.fileExists(project, it) }
 
         return DefaultActionGroup().apply {
             add(SaveCurrentAction())
 
             addSection("flows.group.saved", saved.map { flow ->
-                OpenEntryAction(flow.name, flow.entry, flow.limits, resolvable)
+                OpenEntryAction(flow.name, flow.entry, flow.limits, present)
             })
             addSection("flows.group.recent", recent.map { flow ->
-                OpenEntryAction(flow.entry.displayName, flow.entry, flow.limits, resolvable)
+                OpenEntryAction(flow.entry.displayName, flow.entry, flow.limits, present)
             })
             addSection("flows.group.pins", pins.map { pin ->
-                OpenEntryAction(pin.displayName, pin, null, resolvable)
+                OpenEntryAction(pin.displayName, pin, null, present)
             })
         }
     }
@@ -99,9 +97,9 @@ class FlowsMenu(
         name: String,
         private val ref: FlowEntryRef,
         private val limits: FlowLimits?,
-        resolvable: Map<String, Boolean>,
+        present: Map<String, Boolean>,
     ) : AnAction(
-        if (resolvable[ref.key] == true) {
+        if (present[entryKey(ref)] == true) {
             label(name, ref)
         } else {
             FlowLensBundle.message("flows.entry.unresolved", label(name, ref))
@@ -109,7 +107,7 @@ class FlowsMenu(
         null,
         null,
     ), DumbAware {
-        private val found = resolvable[ref.key] == true
+        private val found = present[entryKey(ref)] == true
 
         override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
 
@@ -125,5 +123,8 @@ class FlowsMenu(
     private companion object {
         fun label(name: String, ref: FlowEntryRef): String =
             ref.containerName?.let { "$name  —  $it" } ?: name
+
+        /** Two entries can share a key and differ by file; they are not the same row. */
+        fun entryKey(ref: FlowEntryRef): String = "${ref.path}::${ref.key}"
     }
 }

@@ -45,6 +45,17 @@ data class FlowEntryRef(
             )
 
         /**
+         * Whether [symbol] can be stored at all. A key that no analyzer can
+         * produce from a declaration — the placeholder for an unresolved call, or
+         * a compiler-generated member — would be stored and then never resolve,
+         * and one built from a file name rather than a qualified type is not
+         * unique within that file. Storing either would break §8's promise that a
+         * mark points at what it says it points at.
+         */
+        fun isStorable(symbol: FlowSymbol): Boolean =
+            !symbol.key.contains(":?#") && !symbol.key.endsWith("(generated)")
+
+        /**
          * An absolute path would leak the machine layout into a file that is
          * often committed (guardrails §13). Outside the project — a library
          * source, a scratch — there is nothing to be relative to, so the URL is
@@ -53,6 +64,12 @@ data class FlowEntryRef(
         fun relativePathOf(project: Project, file: VirtualFile): String {
             val base = project.guessProjectDir() ?: return file.url
             return VfsUtilCore.getRelativePath(file, base) ?: file.url
+        }
+
+        /** True when the file sits inside the project, so its path is relative. */
+        fun isInsideProject(project: Project, file: VirtualFile): Boolean {
+            val base = project.guessProjectDir() ?: return false
+            return VfsUtilCore.getRelativePath(file, base) != null
         }
     }
 }
@@ -82,6 +99,14 @@ object FlowEntryResolver {
         val declaration = findByKey(psiFile, ref.key) ?: return EntryResolution.NotFound
         return EntryResolution.Found(psiFile, declaration)
     }
+
+    /**
+     * Whether the file a stored entry names still exists. A VFS lookup only, so
+     * it is cheap enough to run for a whole list; whether the declaration inside
+     * it survived is a separate, expensive question.
+     */
+    fun fileExists(project: Project, ref: FlowEntryRef): Boolean =
+        fileOf(project, ref)?.isValid == true
 
     private fun fileOf(project: Project, ref: FlowEntryRef): VirtualFile? {
         val base = project.guessProjectDir()

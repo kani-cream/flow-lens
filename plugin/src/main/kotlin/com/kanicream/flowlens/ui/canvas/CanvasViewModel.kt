@@ -212,6 +212,36 @@ object CanvasViewModelBuilder {
         return rootVM
     }
 
+    /**
+     * The call nodes that have to be expanded for [target] to be on screen.
+     *
+     * A reason in the status summary points at a node that is usually deep — a
+     * depth-limited call is by definition at the depth limit — and a link that
+     * silently does nothing is worse than no link (`V0.3_SPEC.md` §7.3).
+     */
+    fun revealPath(result: FlowAnalysisResult, target: NodeId): Set<NodeId> {
+        val frameOf = mutableMapOf<NodeId, FrameId>()
+        val ownerOf = mutableMapOf<FrameId, NodeId>()
+        for (frame in result.frames.values) {
+            fun index(events: List<FlowNode>) {
+                for (node in events) {
+                    frameOf[node.id] = frame.id
+                    node.targetFrameId?.let { ownerOf[it] = node.id }
+                    node.branches.forEach { index(it.events) }
+                }
+            }
+            index(frame.events)
+        }
+        val path = mutableSetOf<NodeId>()
+        var frame = frameOf[target] ?: return path
+        while (frame != result.rootFrame?.id) {
+            val owner = ownerOf[frame] ?: break
+            if (!path.add(owner)) break
+            frame = frameOf[owner] ?: break
+        }
+        return path
+    }
+
     /** All cards currently visible, in top-to-bottom layout order, for keyboard navigation. */
     fun visibleCards(root: FrameVM?): List<CardVM> {
         val out = mutableListOf<CardVM>()

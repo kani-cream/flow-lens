@@ -482,6 +482,11 @@ internal class FlowAnalysisRun(
                 put(FlowMetadata.ORIGIN, target.sourceOrigin.name)
                 if (target.inTestSource) put(FlowMetadata.TEST_SOURCE, "true")
                 if (call.conditional) put(FlowMetadata.CONDITIONAL, "true")
+                if (target.hasAnalyzableBody &&
+                    target.resolutionStatus == ResolutionStatus.PROJECT_LOCAL
+                ) {
+                    put(FlowMetadata.ANALYZABLE, "true")
+                }
             }
             val recursable = TraversalPolicy.mayEnterBody(
                 TargetFacts(

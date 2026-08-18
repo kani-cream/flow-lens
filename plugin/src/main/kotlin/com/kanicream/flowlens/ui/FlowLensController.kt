@@ -17,6 +17,10 @@ import com.kanicream.flowlens.FlowLensBundle
 import com.kanicream.flowlens.core.model.FlowLimits
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.workflow.FlowEntryLauncher
+import com.kanicream.flowlens.core.model.FlowSymbol
+import com.kanicream.flowlens.service.FlowMetadata
+import com.kanicream.flowlens.workflow.EntryResolution
+import com.kanicream.flowlens.workflow.FlowEntryResolver
 import com.kanicream.flowlens.workflow.FlowEntryRef
 import com.kanicream.flowlens.workflow.FlowLensFlows
 import com.kanicream.flowlens.workflow.LaunchOutcome
@@ -84,6 +88,7 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
         canvas.onZoomChanged = { onViewStateChanged() }
         canvas.onTogglePin = ::togglePin
         canvas.onAnalyzeFromHere = ::analyzeFromHere
+        canvas.canAnalyzeFrom = ::canAnalyzeFrom
         flows.onChanged = { refreshPins() }
         refreshPins()
         selectionModel.addListener { card: CardVM? -> detailsPanel.show(card?.node) }
@@ -162,8 +167,28 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
         val symbol = card?.node?.targetSymbol ?: result.rootFrame?.symbol ?: return
         val location = card?.node?.targetLocation ?: result.rootFrame?.entryLocation
         val file = fileOf(location) ?: return
-        flows.togglePin(FlowEntryRef.of(symbol, project, file))
+        val ref = storableRef(symbol, file) ?: return
+        flows.togglePin(ref)
         refreshPins()
+    }
+
+    /**
+     * A stored entry has to be findable again by its key alone, so anything that
+     * would not survive the round trip is refused rather than stored as a mark
+     * that can never match (`V0.3_SPEC.md` §8).
+     *
+     * That rules out a placeholder key for an unresolved call, a
+     * compiler-generated member, a file outside the project — whose path could
+     * not be stored relatively — and a key that resolves to a different
+     * declaration than the one being marked.
+     */
+    private fun storableRef(symbol: FlowSymbol, file: VirtualFile): FlowEntryRef? {
+        if (!FlowEntryRef.isStorable(symbol)) return null
+        if (!FlowEntryRef.isInsideProject(project, file)) return null
+        val ref = FlowEntryRef.of(symbol, project, file)
+        val resolved = runReadActionBlocking { FlowEntryResolver.resolve(project, ref) }
+        if (resolved !is EntryResolution.Found) return null
+        return ref
     }
 
     /** Promotes a call's target to the new root (`V0.3_SPEC.md` §6). */
@@ -186,12 +211,22 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
      */
     private fun canAnalyzeFrom(card: CardVM): Boolean =
         card.node.targetLocation != null &&
-            card.node.resolutionStatus == ResolutionStatus.PROJECT_LOCAL
+            card.node.metadata[FlowMetadata.ANALYZABLE] == "true"
 
     /** Opens a stored entry, reporting rather than guessing when it is gone. */
     fun openEntry(ref: FlowEntryRef, limits: FlowLimits?): LaunchOutcome {
         val outcome = FlowEntryLauncher.launch(project, ref, limits)
-        if (outcome is LaunchOutcome.Started) canvas.requestFocusInWindow()
+        when (outcome) {
+            is LaunchOutcome.Started -> canvas.requestFocusInWindow()
+            // The menu only checked that the file is still there, because
+            // resolving every entry would parse every file on the EDT. The
+            // declaration can still be gone, and saying so beats doing nothing.
+            LaunchOutcome.Unresolved -> Messages.showWarningDialog(
+                project,
+                FlowLensBundle.message("flows.entry.missing.message", ref.displayName),
+                FlowLensBundle.message("flows.entry.missing.title"),
+            )
+        }
         return outcome
     }
 
@@ -199,7 +234,7 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
     fun currentEntry(): FlowEntryRef? {
         val root = service.results.value?.rootFrame ?: return null
         val file = fileOf(root.entryLocation) ?: return null
-        return FlowEntryRef.of(root.symbol, project, file)
+        return storableRef(root.symbol, file)
     }
 
     private fun fileOf(location: FlowLocation?): VirtualFile? {
@@ -279,6 +314,9 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
         jobs.forEach(Job::cancel)
         jobs.clear()
         selectionModel.clear()
+        // The store outlives the tool window, so a listener left installed would
+        // hold the whole disposed Swing tree (guardrails §15).
+        flows.onChanged = {}
     }
 
     private companion object {
