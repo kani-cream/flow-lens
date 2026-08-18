@@ -243,11 +243,19 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
                 is PsiTryStatement -> walkTry(element)
                 is PsiReturnStatement -> {
                     element.returnValue?.let(::walk)
-                    sink += ExtractedTerminator(FlowNodeKind.RETURN, element)
+                    sink += ExtractedTerminator(
+                        FlowNodeKind.RETURN,
+                        element,
+                        SourceSummary.of(element.returnValue?.text),
+                    )
                 }
                 is PsiThrowStatement -> {
                     element.exception?.let(::walk)
-                    sink += ExtractedTerminator(FlowNodeKind.THROW, element)
+                    sink += ExtractedTerminator(
+                        FlowNodeKind.THROW,
+                        element,
+                        SourceSummary.of(element.exception?.text),
+                    )
                 }
                 is PsiBreakStatement -> {
                     // A `break` that ends a switch case is already expressed by the

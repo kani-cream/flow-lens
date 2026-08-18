@@ -30,8 +30,12 @@ data class FlowNode(
      * (`V0.2_SPEC.md` §3).
      */
     val branches: List<FlowBranch> = emptyList(),
-    /** Short source-derived text describing the structure, for display only. */
-    val structureSummary: String? = null,
+    /**
+     * Short source-derived text describing what this event acts on: a condition,
+     * a switch subject, a loop header, or the expression a `return` hands back.
+     * Display only — never logged (`IMPLEMENTATION_GUARDRAILS.md` §13).
+     */
+    val sourceSummary: String? = null,
 ) {
     /** True when this event owns branches rather than being a single step. */
     val isStructure: Boolean get() = branches.isNotEmpty()

@@ -117,6 +117,24 @@ class KotlinStructureExtractionTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(listOf("a", "RETURN"), shape(items))
     }
 
+    fun `test a return says what it hands back`() {
+        val bare = itemsOf("return").filterIsInstance<ExtractedTerminator>().single()
+        assertNull(bare.summary)
+
+        val valued = myFixture.configureByText(
+            "ret.kt",
+            """
+            fun run(): Int { return one() }
+            fun one(): Int = 1
+            """.trimIndent(),
+        )
+        val function = PsiTreeUtil.findChildrenOfType(valued, KtNamedFunction::class.java)
+            .first { it.name == "run" }
+        val terminator = analyzer.extractDirectFlow(function).items
+            .filterIsInstance<ExtractedTerminator>().single()
+        assertEquals("one()", terminator.summary)
+    }
+
     fun `test J a throw evaluates its expression first`() {
         val items = itemsOf("throw IllegalStateException(one().toString())")
         assertEquals("THROW", shape(items).last())

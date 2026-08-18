@@ -186,7 +186,16 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                 is GoSelectStatement -> walkSwitch(element, isSelect = true)
                 is GoReturnStatement -> {
                     element.expressionList.forEach(::walk)
-                    sink += ExtractedTerminator(FlowNodeKind.RETURN, element)
+                    // Go returns several values at once, so the card lists them.
+                    sink += ExtractedTerminator(
+                        FlowNodeKind.RETURN,
+                        element,
+                        SourceSummary.of(
+                            element.expressionList
+                                .joinToString(", ") { it.text }
+                                .ifEmpty { null },
+                        ),
+                    )
                 }
                 is GoBreakStatement -> {
                     // A `break` that leaves a switch or select case is already

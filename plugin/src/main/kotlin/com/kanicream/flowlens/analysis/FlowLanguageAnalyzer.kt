@@ -46,6 +46,12 @@ class ExtractedBranch(
 class ExtractedTerminator(
     val kind: FlowNodeKind,
     val anchor: PsiElement,
+    /**
+     * What is handed back, as written. `return;` and `return total();` are
+     * different events, and a terminator that cannot say which is barely worth
+     * drawing.
+     */
+    val summary: String? = null,
 ) : FlowItem
 
 /**

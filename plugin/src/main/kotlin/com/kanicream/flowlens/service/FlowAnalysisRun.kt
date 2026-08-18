@@ -270,6 +270,7 @@ internal class FlowAnalysisRun(
                 dispatchConfidence = null,
                 executionMode = ExecutionMode.SYNC,
                 orderingStatus = OrderingStatus.DETERMINISTIC,
+                sourceSummary = terminator.summary,
             ),
         )
         nodesProduced = builder.nodeCount
@@ -389,6 +390,7 @@ internal class FlowAnalysisRun(
     private class ComputedTerminator(
         val kind: FlowNodeKind,
         val location: FlowLocation?,
+        val summary: String?,
     ) : ComputedItem
 
     private class ComputedStructure(
@@ -455,6 +457,7 @@ internal class FlowAnalysisRun(
             is ExtractedTerminator -> ComputedTerminator(
                 kind = item.kind,
                 location = handles.locationOf(item.anchor),
+                summary = item.summary,
             )
             is ExtractedCall -> computeCall(analyzer, item)
         }

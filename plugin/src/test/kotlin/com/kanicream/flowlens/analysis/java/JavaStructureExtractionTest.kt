@@ -126,6 +126,28 @@ class JavaStructureExtractionTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(listOf("a", "RETURN"), shape(items))
     }
 
+    fun `test a return says what it hands back`() {
+        val bare = itemsOf("return;").filterIsInstance<ExtractedTerminator>().single()
+        assertNull("nothing is handed back, so there is nothing to say", bare.summary)
+
+        val valued = itemsOf("if (flag) { return; } return one();")
+        val terminators = valued.filterIsInstance<ExtractedTerminator>()
+        assertEquals(
+            "the two returns stop the path for different reasons",
+            "one()",
+            terminators.single().summary,
+        )
+        val inBranch = structure(valued).branches.single()
+            .items.filterIsInstance<ExtractedTerminator>().single()
+        assertNull(inBranch.summary)
+    }
+
+    fun `test a throw says what it throws`() {
+        val items = itemsOf("throw new IllegalStateException();")
+        val terminator = items.filterIsInstance<ExtractedTerminator>().single()
+        assertEquals("new IllegalStateException()", terminator.summary)
+    }
+
     fun `test J a throw evaluates its expression first`() {
         val items = itemsOf("throw new IllegalStateException(String.valueOf(one()));")
         assertEquals(listOf("one", "valueOf", "IllegalStateException", "THROW"), shape(items))

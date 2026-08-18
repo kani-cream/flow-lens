@@ -94,6 +94,28 @@ class GoStructureExtractionTest : BasePlatformTestCase() {
     fun `test I a return terminates after its expression`() {
         val items = itemsOf("a()\nreturn")
         assertEquals(listOf("a", "RETURN"), shape(items))
+        assertNull(items.filterIsInstance<ExtractedTerminator>().single().summary)
+    }
+
+    fun `test a return lists every value it hands back`() {
+        val file = myFixture.configureByText(
+            "multi.go",
+            """
+            package sample
+
+            func run() (int, error) { return subject(), nil }
+            func subject() int { return 1 }
+            """.trimIndent(),
+        )
+        val function = PsiTreeUtil.findChildrenOfType(file, GoFunctionOrMethodDeclaration::class.java)
+            .first { it.name == "run" }
+        val terminator = analyzer.extractDirectFlow(function).items
+            .filterIsInstance<ExtractedTerminator>().single()
+        assertEquals(
+            "a Go function returns several values at once",
+            "subject(), nil",
+            terminator.summary,
+        )
     }
 
     fun `test M structures nest`() {
