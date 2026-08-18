@@ -38,6 +38,7 @@ import com.kanicream.flowlens.workflow.EntryResolution
 import com.kanicream.flowlens.workflow.FlowEntryRef
 import com.kanicream.flowlens.workflow.FlowEntryResolver
 import com.kanicream.flowlens.dispatch.CandidateFinder
+import com.kanicream.flowlens.analysis.ExtractedCallback
 import com.kanicream.flowlens.core.model.FlowSymbol
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.core.model.RunId
@@ -259,6 +260,7 @@ internal class FlowAnalysisRun(
         for (item in items) {
             val complete = when (item) {
                 is ComputedCall -> appendCall(builder, queue, task, item)
+                is ComputedCallback -> appendCallback(builder, queue, task, item)
                 is ComputedTerminator -> appendTerminator(builder, task, item)
                 is ComputedStructure -> appendStructure(builder, queue, task, item)
             }
@@ -266,6 +268,72 @@ internal class FlowAnalysisRun(
         }
         return true
     }
+
+    /**
+     * Appends a callback and queues its body, which costs a depth level and node
+     * budget like any other callable body — nothing about a lambda earns it an
+     * exemption (`V0.5_SPEC.md` §3.2).
+     */
+    private fun appendCallback(
+        builder: FlowModelBuilder,
+        queue: PendingFrameQueue,
+        task: PendingFrame,
+        callback: ComputedCallback,
+    ): Boolean {
+        val depthExceeded = task.depth + 1 > limits.maxDepth
+        val metadata = buildMap {
+            if (callback.conditional) put(FlowMetadata.CONDITIONAL, "true")
+            if (depthExceeded) put(FlowMetadata.LIMIT, FlowMetadata.LIMIT_DEPTH)
+        }
+        val nodeId = builder.addEvent(
+            task.frameId,
+            FlowEventSpec(
+                kind = FlowNodeKind.CALLBACK,
+                callSiteLocation = callback.location,
+                targetSymbol = callback.symbol,
+                targetLocation = callback.location,
+                resolutionStatus = ResolutionStatus.PROJECT_LOCAL,
+                // A body written here has no dispatch: there is nothing to
+                // choose between, so claiming a confidence would be noise.
+                dispatchConfidence = null,
+                executionMode = callback.executionMode,
+                orderingStatus = callback.orderingStatus,
+                metadata = metadata,
+            ),
+        )
+        nodesProduced = builder.nodeCount
+        if (nodeId == null) {
+            builder.addLimitEvent(task.frameId)
+            nodesProduced = builder.nodeCount
+            return false
+        }
+        if (!depthExceeded && callback.location != null) {
+            val childFrameId =
+                builder.openChildFrame(task.frameId, nodeId, callback.symbol, callback.location)
+            queue.enqueue(
+                PendingFrame(
+                    frameId = childFrameId,
+                    callableHandle = callback.location.handle,
+                    depth = task.depth + 1,
+                    path = task.path,
+                ),
+            )
+        }
+        return true
+    }
+
+    /**
+     * Names a callback by the call it was handed to, so two of them are
+     * distinguishable. A body invoked where it is written has no such call, and
+     * naming it after itself would say less than the braces already do.
+     */
+    private fun callbackSymbol(languageId: String, receiver: String?): FlowSymbol =
+        FlowSymbol(
+            languageId = languageId,
+            displayName = receiver?.let { "{ } → $it()" } ?: "{ }",
+            containerName = null,
+            key = "$languageId:callback#${receiver ?: "in-place"}",
+        )
 
     private fun appendTerminator(
         builder: FlowModelBuilder,
@@ -406,6 +474,19 @@ internal class FlowAnalysisRun(
         val childEntryLocation: FlowLocation?,
     ) : ComputedItem
 
+    /**
+     * A callable body handed to a call. It is not a call — nothing resolves, and
+     * there is no dispatch to be confident or unsure about — but it owns a frame
+     * and answers when it runs (`V0.5_SPEC.md` §3).
+     */
+    private class ComputedCallback(
+        val symbol: FlowSymbol,
+        val location: FlowLocation?,
+        val executionMode: ExecutionMode,
+        val orderingStatus: OrderingStatus,
+        val conditional: Boolean,
+    ) : ComputedItem
+
     private class ComputedTerminator(
         val kind: FlowNodeKind,
         val location: FlowLocation?,
@@ -472,6 +553,13 @@ internal class FlowAnalysisRun(
                     ComputedBranch(branch.kind, branch.label, computeItems(analyzer, branch.items))
                 },
                 metadata = item.metadata,
+            )
+            is ExtractedCallback -> ComputedCallback(
+                symbol = callbackSymbol(analyzer.languageId, item.receiverShortName),
+                location = handles.locationOf(item.body),
+                executionMode = item.executionMode,
+                orderingStatus = item.orderingStatus,
+                conditional = item.conditional,
             )
             is ExtractedTerminator -> ComputedTerminator(
                 kind = item.kind,

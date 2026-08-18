@@ -352,7 +352,9 @@ class FlowCanvas : JComponent() {
         var previous: CardVM? = null
         for (card in cards) {
             if (previous == null) {
-                if (card.dashedIncomingConnector) paintLeadIn(g2, card, bodyTop)
+                if (card.dashedIncomingConnector || card.boundaryBeforeCard) {
+                    paintLeadIn(g2, card, bodyTop)
+                }
             } else {
                 paintConnector(g2, previous, card)
             }
@@ -362,19 +364,24 @@ class FlowCanvas : JComponent() {
         }
     }
 
-    /** A short non-certain connector from the body's start into its first call. */
+    /**
+     * The connector from the body's start into its first call, drawn when that
+     * call needs one: because it may not run, or because reaching it already
+     * crosses out of the project.
+     */
     private fun paintLeadIn(g2: Graphics2D, card: CardVM, bodyTop: Int) {
         val x = card.bounds.x + card.bounds.width / 2
         val yEnd = card.bounds.y
         if (yEnd - bodyTop < 6) return
         g2.color = Palette.connector
-        g2.stroke = DASHED_STROKE
+        g2.stroke = if (card.dashedIncomingConnector) DASHED_STROKE else SOLID_STROKE
         g2.drawLine(x, bodyTop, x, yEnd - 2)
         g2.fillPolygon(
             intArrayOf(x - 4, x + 4, x),
             intArrayOf(yEnd - 6, yEnd - 6, yEnd - 1),
             3,
         )
+        if (card.boundaryBeforeCard) paintBoundaryMarker(g2, x, (bodyTop + yEnd) / 2)
     }
 
     /**
@@ -454,16 +461,18 @@ class FlowCanvas : JComponent() {
             intArrayOf(yEnd - 6, yEnd - 6, yEnd - 1),
             3,
         )
-        if (to.boundaryBeforeCard) {
-            // Local project-boundary crossing (VISUAL_DESIGN.md section 11).
-            val midY = (fromBottom + yEnd) / 2
-            g2.stroke = SOLID_STROKE
-            g2.drawLine(x - 3, midY - 5, x - 3, midY + 5)
-            g2.drawLine(x + 3, midY - 5, x + 3, midY + 5)
-            g2.font = JBUI.Fonts.miniFont()
-            g2.color = Palette.boundaryText
-            g2.drawString(FlowLensBundle.message("card.boundary.label"), x + 10, midY + 4)
-        }
+        if (to.boundaryBeforeCard) paintBoundaryMarker(g2, x, (fromBottom + yEnd) / 2)
+    }
+
+    /** Local project-boundary crossing (VISUAL_DESIGN.md section 11). */
+    private fun paintBoundaryMarker(g2: Graphics2D, x: Int, midY: Int) {
+        g2.color = Palette.connector
+        g2.stroke = SOLID_STROKE
+        g2.drawLine(x - 3, midY - 5, x - 3, midY + 5)
+        g2.drawLine(x + 3, midY - 5, x + 3, midY + 5)
+        g2.font = JBUI.Fonts.miniFont()
+        g2.color = Palette.boundaryText
+        g2.drawString(FlowLensBundle.message("card.boundary.label"), x + 10, midY + 4)
     }
 
     /**

@@ -37,6 +37,8 @@ import com.kanicream.flowlens.analysis.SourceSummary
 import com.kanicream.flowlens.analysis.FlowLanguageAnalyzer
 import com.kanicream.flowlens.analysis.PsiClassification
 import com.kanicream.flowlens.analysis.ResolvedCallTarget
+import com.kanicream.flowlens.analysis.CallbackTiming
+import com.kanicream.flowlens.analysis.ExtractedCallback
 import com.kanicream.flowlens.analysis.SymbolQualifier
 import com.kanicream.flowlens.analysis.TargetClassifier
 import com.kanicream.flowlens.core.model.BranchKind
@@ -62,7 +64,7 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
     override val languageId: String = "go"
 
     override fun supportsDeclaration(element: PsiElement): Boolean =
-        element is GoFunctionOrMethodDeclaration
+        element is GoFunctionOrMethodDeclaration || element is GoFunctionLit
 
     override fun findEntryPoint(file: PsiFile, offset: Int): PsiElement? {
         if (file !is GoFile) return null
@@ -78,16 +80,34 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
         return declaration
     }
 
-    override fun describeCallable(callable: PsiElement): FlowSymbol =
-        symbolOf(callable as GoFunctionOrMethodDeclaration)
+    override fun describeCallable(callable: PsiElement): FlowSymbol = when (callable) {
+        is GoFunctionLit -> literalSymbolOf(callable)
+        else -> symbolOf(callable as GoFunctionOrMethodDeclaration)
+    }
 
-    override fun hasAnalyzableBody(declaration: PsiElement): Boolean =
-        declaration is GoFunctionOrMethodDeclaration && declaration.block != null
+    /** A function literal has no name; its position keeps two in one function distinct. */
+    private fun literalSymbolOf(literal: GoFunctionLit): FlowSymbol = FlowSymbol(
+        languageId = languageId,
+        displayName = "func() { }",
+        containerName = (literal.containingFile as? GoFile)?.packageName,
+        key = "go:literal@${SymbolQualifier.fileQualifier(literal)}:${literal.textOffset}",
+    )
+
+    override fun isAnonymousBody(declaration: PsiElement): Boolean =
+        declaration is GoFunctionLit
+
+    override fun hasAnalyzableBody(declaration: PsiElement): Boolean = when (declaration) {
+        is GoFunctionLit -> declaration.block != null
+        is GoFunctionOrMethodDeclaration -> declaration.block != null
+        else -> false
+    }
 
     override fun extractDirectFlow(callable: PsiElement): DirectFlowExtraction {
-        val declaration = callable as GoFunctionOrMethodDeclaration
         val extractor = Extractor()
-        declaration.block?.let(extractor::walk)
+        when (callable) {
+            is GoFunctionLit -> callable.block?.let(extractor::walk)
+            else -> (callable as GoFunctionOrMethodDeclaration).block?.let(extractor::walk)
+        }
         return DirectFlowExtraction(extractor.items(), extractor.controlFlowSimplified)
     }
 
@@ -173,19 +193,28 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
         fun walk(element: PsiElement) {
             when (element) {
                 is PsiComment -> return
-                // Closures are traversal boundaries (KNOWN_LIMITATIONS.md section 11).
+                // A closure does not run where it is written; it is emitted after
+                // the call that received it (`V0.5_SPEC.md` §3).
                 is GoFunctionLit -> return
                 is GoCallExpr -> {
                     element.expression?.let(::walk)
                     element.argumentList.expressionList.forEach(::walk)
-                    callsExtracted += 1
-                    sink += ExtractedCall(
-                        callSite = element,
-                        kind = FlowNodeKind.CALL,
-                        calleeShortName = calleeNameOf(element),
-                        executionMode = executionModeOf(element),
-                        conditional = conditionalDepth > 0,
-                    )
+                    val mode = executionModeOf(element)
+                    // `go func() { … }()` invokes a body written right here. The
+                    // call and the body are one thing, and there is no declaration
+                    // to resolve, so emitting a call as well produced a second
+                    // card that could only ever report itself as unresolved.
+                    if (element.expression !is GoFunctionLit) {
+                        callsExtracted += 1
+                        sink += ExtractedCall(
+                            callSite = element,
+                            kind = FlowNodeKind.CALL,
+                            calleeShortName = calleeNameOf(element),
+                            executionMode = mode,
+                            conditional = conditionalDepth > 0,
+                        )
+                    }
+                    addCallbacks(element, mode)
                 }
                 is GoIfStatement -> walkIf(element)
                 is GoForStatement -> walkLoop(element)
@@ -230,6 +259,45 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                     if (callsExtracted > before) controlFlowSimplified = true
                 }
                 else -> element.children.forEach(::walk)
+            }
+        }
+
+        /**
+         * `go func() { … }()` and `defer func() { … }()` hand a body to the
+         * runtime. Go states the timing itself, so unlike Java there is nothing
+         * to look up: the call's own execution mode is the body's.
+         */
+        private fun addCallbacks(call: GoCallExpr, mode: ExecutionMode) {
+            val invokedInPlace = call.expression as? GoFunctionLit
+            val literals = buildList {
+                invokedInPlace?.let(::add)
+                addAll(call.argumentList.expressionList.filterIsInstance<GoFunctionLit>())
+            }
+            if (literals.isEmpty()) return
+            val timing = when (mode) {
+                ExecutionMode.GOROUTINE -> CallbackTiming.GOROUTINE
+                ExecutionMode.DEFERRED -> CallbackTiming.DEFERRED
+                // An immediately invoked literal runs right here.
+                else -> if (invokedInPlace != null) {
+                    CallbackTiming.IN_PLACE
+                } else {
+                    CallbackTiming.UNDETERMINED
+                }
+            }
+            for (literal in literals) {
+                sink += ExtractedCallback(
+                    body = literal,
+                    // A body invoked where it is written was handed to nobody,
+                    // so there is no receiver to name it after.
+                    receiverShortName = if (literal === invokedInPlace) {
+                        null
+                    } else {
+                        calleeNameOf(call)
+                    },
+                    executionMode = timing.executionMode,
+                    orderingStatus = timing.orderingStatus,
+                    conditional = conditionalDepth > 0,
+                )
             }
         }
 
@@ -361,9 +429,12 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
             }
         }
 
-        private fun calleeNameOf(call: GoCallExpr): String =
-            (call.expression as? GoReferenceExpression)?.identifier?.text
-                ?: call.expression?.text ?: "?"
+        private fun calleeNameOf(call: GoCallExpr): String = when (val callee = call.expression) {
+            is GoReferenceExpression -> callee.identifier.text
+            // A literal has no name, and its whole source text is not one.
+            is GoFunctionLit -> "func"
+            else -> callee.text
+        }
 
         /**
          * `go f()` and `defer f()` apply to the statement's own call expression;

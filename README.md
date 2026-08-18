@@ -29,6 +29,11 @@ onboarding, and investigation.
 - **Execution semantics preserved.** Go `go f()` stays a goroutine and
   `defer f()` stays deferred; neither is drawn as an ordinary synchronous
   continuation.
+- **Callback bodies, with a timing.** A lambda, a trailing lambda, or a Go
+  closure handed to a call is a step of its own, named after the call it was
+  given to, with a body you can open. Each one says when it runs — in place,
+  concurrently, as a goroutine, deferred — or that the timing could not be
+  determined, which is stated rather than left for you to assume.
 - **No phantom flow.** Compiler-generated declarations — Kotlin data-class
   `copy()`/`componentN()` and friends — are classified by provenance and never
   entered as if they were code you wrote.
@@ -96,16 +101,20 @@ The `plan/` directory is normative, not aspirational:
 | `plan/TEST_STRATEGY.md` | Required validation layers |
 | `plan/KNOWN_LIMITATIONS.md` | Deliberately accepted limitations |
 | `plan/MILESTONE_0_RESULTS.md` | Feasibility evidence and baseline selection |
-| `plan/V0.1_SPEC.md`, `V0.2_SPEC.md`, `V0.3_SPEC.md` | Fixed semantics per milestone |
-| `plan/V0.1_RESULTS.md`, `V0.2_RESULTS.md`, `V0.3_RESULTS.md` | What was verified, and what was not |
+| `plan/V0.1_SPEC.md` … `V0.5_SPEC.md` | Fixed semantics per milestone |
+| `plan/V0.1_RESULTS.md` … `V0.5_RESULTS.md` | What was verified, and what was not |
 
 ## Status
 
-**v0.4 complete.** Java, Kotlin, Go, and mixed Java/Kotlin analysis work end to
+**v0.5 complete.** Java, Kotlin, Go, and mixed Java/Kotlin analysis work end to
 end, with control flow drawn as containers (v0.2), a workflow layer of pins,
-saved flows, recents, and analyze-from-here (v0.3), and ambiguous calls that can
-be followed into a chosen implementation and exported as Markdown or a Mermaid
-diagram (v0.4).
+saved flows, recents, and analyze-from-here (v0.3), ambiguous calls that can be
+followed into a chosen implementation and exported as Markdown or a Mermaid
+diagram (v0.4), and bodies handed to a call — lambdas, trailing lambdas, Go
+closures — on the map with a stated timing (v0.5).
+
+v0.5 is the last milestone that adds capability. What follows is stabilization:
+the same product, made safe to rely on daily.
 
 | Milestone | State | Evidence |
 |---|---|---|
@@ -114,7 +123,8 @@ diagram (v0.4).
 | v0.2 — control flow | done | `plan/V0.2_RESULTS.md` |
 | v0.3 — developer workflow | done | `plan/V0.3_RESULTS.md` |
 | v0.4 — ambiguity and sharing | done | `plan/V0.4_RESULTS.md` |
-| v0.5 — advanced exploration | next | `plan/PLAN.md` §17 |
+| v0.5 — async semantics | done | `plan/V0.5_RESULTS.md` |
+| v1.0 — stabilization and release | planned | `plan/PLAN.md` §17 |
 
 Plugin Verifier reports zero compatibility, deprecated, experimental, and
 internal API usages against both the minimum and latest supported builds.

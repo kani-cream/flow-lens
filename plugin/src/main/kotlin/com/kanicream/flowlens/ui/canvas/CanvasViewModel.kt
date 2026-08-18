@@ -458,9 +458,16 @@ object CanvasViewModelBuilder {
         else -> null
     }
 
+    /**
+     * When a body runs, at a glance. `UNKNOWN` is marked rather than left blank:
+     * silence would let the reader supply their own assumption, which is exactly
+     * the mistake the map exists to prevent (`V0.5_SPEC.md` §5.4).
+     */
     private fun executionGlyphOf(node: FlowNode): String? = when (node.executionMode) {
         ExecutionMode.GOROUTINE -> "⚡"
         ExecutionMode.DEFERRED -> "↩"
+        ExecutionMode.ASYNC -> "⇢"
+        ExecutionMode.UNKNOWN -> "⧖"
         else -> null
     }
 
@@ -557,12 +564,14 @@ object CanvasViewModelBuilder {
     private fun layoutCards(cards: List<CardVM>, cardX: Int, top: Int, contentWidth: Int): Int {
         var cursorY = top
         cards.forEachIndexed { index, card ->
-            if (index > 0) {
-                cursorY += if (card.boundaryBeforeCard) {
-                    CanvasMetrics.BOUNDARY_GAP
-                } else {
-                    CanvasMetrics.CONNECTOR_GAP
-                }
+            cursorY += when {
+                // A frame's own body is project code, so the first call in it can
+                // cross out of the project like any other. Without room for the
+                // marker it would be the one crossing the reader is never shown,
+                // and two identical external calls would look different.
+                card.boundaryBeforeCard -> CanvasMetrics.BOUNDARY_GAP
+                index > 0 -> CanvasMetrics.CONNECTOR_GAP
+                else -> 0
             }
             card.bounds = Rectangle(cardX, cursorY, contentWidth, CanvasMetrics.CARD_HEIGHT)
             cursorY += CanvasMetrics.CARD_HEIGHT

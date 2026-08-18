@@ -5,6 +5,7 @@ import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
 import com.kanicream.flowlens.analysis.ExtractedBranch
 import com.kanicream.flowlens.analysis.ExtractedCall
+import com.kanicream.flowlens.analysis.ExtractedCallback
 import com.kanicream.flowlens.analysis.ExtractedStructure
 import com.kanicream.flowlens.analysis.ExtractedTerminator
 import com.kanicream.flowlens.analysis.FlowItem
@@ -40,6 +41,7 @@ class GoStructureExtractionTest : BasePlatformTestCase() {
             is ExtractedCall -> item.calleeShortName
             is ExtractedTerminator -> item.kind.name
             is ExtractedStructure -> item.kind.name
+            is ExtractedCallback -> "callback:${item.receiverShortName}"
         }
     }
 

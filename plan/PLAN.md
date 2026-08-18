@@ -655,20 +655,62 @@ Detailed semantics are in `plan/V0.1_SPEC.md`.
 - Mermaid sequence export where semantically valid.
 - copy structured context for external tools/AI.
 
-### v0.5+ — Advanced Exploration
+### v0.5 — Async Semantics — delivered 2026-08-19
 
-- Sequence View.
-- alternate/free Graph View.
-- flow snapshot comparison.
-- flow-change detection.
-- framework-aware resolution helpers.
-- async lanes for Java/Kotlin.
-- richer goroutine/channel visualization for Go.
-- search/filter.
-- selected-path highlighting.
-- reverse/caller analysis.
-- test discovery.
-- Git diff overlay.
+Scoped by the owner on 2026-08-18 to one theme, and the last milestone that adds
+capability. Results in `V0.5_RESULTS.md`.
+
+- callback bodies — a lambda, trailing lambda, or function literal handed to a
+  call becomes a visible event owning its body;
+- execution timing — each such body states whether it runs during the call,
+  later, concurrently, or at a time the analyzer cannot determine;
+- Go parity — `go func() { … }()` and `defer func() { … }()` bodies become
+  visible.
+
+This is a correctness pass rather than a feature. Before v0.5 those bodies were
+dropped with no disclosure, so a map of asynchronous code looked complete and was
+not — the same failure v0.2 closed for branches. See `V0.5_SPEC.md`.
+
+What it does not do is decide the timing by understanding the code. Three things
+justify an answer — Kotlin's `inline` rule, Go's `go`/`defer` keywords, and a
+documented list of APIs — and everything else is `UNKNOWN`, said out loud rather
+than guessed (`KNOWN_LIMITATIONS.md` §39–44).
+
+### v1.0 — Stabilization and release
+
+**No new capability.** After v0.5, feature work stops and the milestone is about
+making what exists safe to rely on daily:
+
+- verification in a production IntelliJ IDEA Ultimate from the installed ZIP,
+  which every milestone so far has deferred to this point;
+- a Japanese-language pass over the UI in a real IDE;
+- performance and behaviour on real projects rather than fixtures — large files,
+  deep hierarchies, many implementations of one method;
+- the accumulated known limitations reviewed as a set: which are still true,
+  which are now fixable, which need to be said more clearly in the UI;
+- release mechanics: marketplace metadata, change notes, compatibility range.
+
+The product v1.0 promises is the one it already has: **from a selected function,
+the forward execution flow, with its uncertainty and its boundaries shown rather
+than hidden.** Breadth is not the goal; being trustworthy at that is.
+
+### v1.x — Candidates after release
+
+Deferred by the owner on 2026-08-18 rather than dropped. Each is worth doing when
+real use asks for it, and each is at least one milestone of its own.
+
+- **Reverse/caller analysis.** Not the forward model mirrored: callers are a set
+  rather than a sequence, so "how far back", "what is a terminus", "a callable
+  with hundreds of callers", and how a result with different meaning shares the
+  canvas are all open design questions.
+- **Flow comparison and change detection.** The deterministic exports of v0.4
+  make this reachable without persisting results, which is why `V0.3_SPEC.md`
+  §2's decision does not have to be revisited.
+- **Framework-aware resolution.** Narrowing ambiguous calls from DI
+  configuration. The hard part is the boundary against "never manufacture
+  certainty", since frameworks are exactly where runtime substitution happens.
+- **Search, filtering, and path highlighting** for large maps.
+- **Sequence and free graph views**, test discovery, Git diff overlay.
 
 ---
 

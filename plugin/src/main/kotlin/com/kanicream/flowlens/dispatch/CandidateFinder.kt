@@ -71,6 +71,7 @@ object CandidateFinder {
                 val analyzer = FlowAnalyzerRegistry.forDeclaration(candidate)
                 val file = candidate.containingFile?.virtualFile
                 if (analyzer == null ||
+                    analyzer.isAnonymousBody(candidate) ||
                     !analyzer.hasAnalyzableBody(candidate) ||
                     file == null ||
                     !FlowEntryRef.isInsideProject(project, file)
@@ -118,7 +119,10 @@ object CandidateFinder {
         DefinitionsScopedSearch.search(original).forEach(
             Processor { candidate ->
                 val analyzer = FlowAnalyzerRegistry.forDeclaration(candidate)
-                if (analyzer == null || !analyzer.hasAnalyzableBody(candidate)) {
+                if (analyzer == null ||
+                    analyzer.isAnonymousBody(candidate) ||
+                    !analyzer.hasAnalyzableBody(candidate)
+                ) {
                     return@Processor true
                 }
                 if (analyzer.describeCallable(candidate).key != chosenKey) return@Processor true

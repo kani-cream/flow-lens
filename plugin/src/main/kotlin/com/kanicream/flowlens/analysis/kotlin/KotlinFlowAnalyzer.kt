@@ -15,6 +15,9 @@ import com.kanicream.flowlens.analysis.SourceSummary
 import com.kanicream.flowlens.analysis.FlowLanguageAnalyzer
 import com.kanicream.flowlens.analysis.PsiClassification
 import com.kanicream.flowlens.analysis.ResolvedCallTarget
+import com.kanicream.flowlens.analysis.CallbackTiming
+import com.kanicream.flowlens.analysis.ExtractedCallback
+import com.kanicream.flowlens.analysis.KnownCallbackApis
 import com.kanicream.flowlens.analysis.SymbolQualifier
 import com.kanicream.flowlens.analysis.TargetClassifier
 import com.kanicream.flowlens.core.model.BranchKind
@@ -65,7 +68,8 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
     override val languageId: String = "kotlin"
 
     override fun supportsDeclaration(element: PsiElement): Boolean =
-        element is KtNamedFunction || element is KtConstructor<*>
+        element is KtNamedFunction || element is KtConstructor<*> ||
+            element is KtLambdaExpression
 
     override fun findEntryPoint(file: PsiFile, offset: Int): PsiElement? {
         if (file.language != KotlinLanguage.INSTANCE) return null
@@ -83,12 +87,17 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
     }
 
     override fun describeCallable(callable: PsiElement): FlowSymbol = when (callable) {
+        is KtLambdaExpression -> lambdaSymbolOf(callable)
         is KtNamedFunction -> symbolOf(callable)
         is KtConstructor<*> -> constructorSymbolOf(callable)
         else -> error("unsupported callable ${callable.javaClass.simpleName}")
     }
 
+    override fun isAnonymousBody(declaration: PsiElement): Boolean =
+        declaration is KtLambdaExpression
+
     override fun hasAnalyzableBody(declaration: PsiElement): Boolean = when (declaration) {
+        is KtLambdaExpression -> declaration.bodyExpression != null
         is KtNamedFunction -> declaration.hasBody()
         is KtSecondaryConstructor -> declaration.bodyExpression != null
         // A primary constructor has no explicit body to traverse in v0.1.
@@ -102,6 +111,7 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
             is KtNamedFunction -> callable.bodyBlockExpression?.let(extractor::walk)
                 ?: callable.bodyExpression?.let(extractor::walk)
             is KtSecondaryConstructor -> callable.bodyExpression?.let(extractor::walk)
+            is KtLambdaExpression -> callable.bodyExpression?.let(extractor::walk)
         }
         return DirectFlowExtraction(extractor.items(), extractor.controlFlowSimplified)
     }
@@ -150,6 +160,17 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
             forceNoBody = resolved is KtClassOrObject,
         )
     }
+
+    /**
+     * A lambda has no name. Keyed by position so two in one function stay
+     * distinct, which cycle detection and pins both rely on.
+     */
+    private fun lambdaSymbolOf(lambda: KtLambdaExpression): FlowSymbol = FlowSymbol(
+        languageId = languageId,
+        displayName = "{ }",
+        containerName = PsiTreeUtil.getParentOfType(lambda, KtNamedFunction::class.java)?.name,
+        key = "kotlin:lambda@${SymbolQualifier.fileQualifier(lambda)}:${lambda.textOffset}",
+    )
 
     /** The type that owns [resolved], for naming and grouping generated members. */
     private fun ownerTypeName(resolved: PsiElement): String? =
@@ -269,7 +290,9 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
 
         fun walk(element: PsiElement) {
             when (element) {
-                // Boundaries (KNOWN_LIMITATIONS.md section 11).
+                // A lambda does not run where it is written; it is emitted
+                // after the call that received it (`V0.5_SPEC.md` §3). An object
+                // literal is a boundary of a different kind (§45).
                 is KtLambdaExpression, is KtObjectLiteralExpression -> return
                 is KtNamedFunction, is KtClassOrObject -> return
                 is KtCallExpression -> {
@@ -277,13 +300,15 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                         arg.getArgumentExpression()?.let(::walk)
                     }
                     callsExtracted += 1
+                    val name = (element.calleeExpression as? KtNameReferenceExpression)
+                        ?.getReferencedName() ?: element.calleeExpression?.text ?: "?"
                     sink += ExtractedCall(
                         callSite = element,
                         kind = FlowNodeKind.CALL,
-                        calleeShortName = (element.calleeExpression as? KtNameReferenceExpression)
-                            ?.getReferencedName() ?: element.calleeExpression?.text ?: "?",
+                        calleeShortName = name,
                         conditional = conditionalDepth > 0,
                     )
+                    addCallbacks(element, name)
                 }
                 is KtIfExpression -> walkIf(element)
                 is KtWhenExpression -> walkWhen(element)
@@ -319,6 +344,48 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
                 is KtBinaryExpression -> walkBinary(element)
                 else -> element.children.forEach(::walk)
             }
+        }
+
+        /**
+         * Emits one event per lambda handed to this call, trailing lambda
+         * included.
+         *
+         * Kotlin can often justify "runs in place": a lambda passed to an
+         * `inline` function without `noinline` cannot escape the call, so it has
+         * run by the time the call returns. That is a language guarantee, not a
+         * guess about an API's intent (`V0.5_SPEC.md` §4.1).
+         */
+        private fun addCallbacks(call: KtCallExpression, receiverName: String) {
+            val lambdas = call.valueArguments.mapNotNull {
+                it.getArgumentExpression() as? KtLambdaExpression
+            }
+            if (lambdas.isEmpty()) return
+            val resolved = call.calleeExpression?.mainReference?.resolve() as? KtNamedFunction
+            val timing = KnownCallbackApis.kotlinTiming(resolved?.fqName?.asString())
+                ?: inlineTiming(resolved)
+                ?: CallbackTiming.UNDETERMINED
+            for (lambda in lambdas) {
+                sink += ExtractedCallback(
+                    body = lambda,
+                    receiverShortName = receiverName,
+                    executionMode = timing.executionMode,
+                    orderingStatus = timing.orderingStatus,
+                    conditional = conditionalDepth > 0,
+                )
+            }
+        }
+
+        /** An inline function's lambda cannot outlive the call, so it runs during it. */
+        private fun inlineTiming(function: KtNamedFunction?): CallbackTiming? {
+            if (function == null) return null
+            if (!function.hasModifier(KtTokens.INLINE_KEYWORD)) return null
+            // `noinline` removes exactly that guarantee for the parameter it is
+            // on, and telling which lambda maps to which parameter is more than
+            // this rule can promise — so any noinline makes the call undetermined.
+            val escapes = function.valueParameters.any {
+                it.hasModifier(KtTokens.NOINLINE_KEYWORD)
+            }
+            return if (escapes) null else CallbackTiming.IN_PLACE
         }
 
         private fun walkIf(element: KtIfExpression) {
