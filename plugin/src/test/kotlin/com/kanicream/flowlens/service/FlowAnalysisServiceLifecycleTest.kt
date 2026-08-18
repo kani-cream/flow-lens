@@ -12,6 +12,7 @@ import com.kanicream.flowlens.testutil.RealJdkProjectDescriptor
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Service/lifecycle integration (TEST_STRATEGY.md Layer C): end-to-end progressive
@@ -30,6 +31,68 @@ class FlowAnalysisServiceLifecycleTest : LightJavaCodeInsightFixtureTestCase() {
     private fun startFromCaret(limits: FlowLimits = FlowLimits()): RunId {
         val file = myFixture.file.virtualFile
         return service.startAnalysis(file, myFixture.caretOffset, limits)
+    }
+
+    fun `test a stop reaches the run being launched, not the one that just ended`() = runBlocking {
+        // The previous run's job stays in the field until the new one is adopted,
+        // so a Stop landing in that window used to cancel a run that had already
+        // finished while the new one carried on. CI found this twice.
+        myFixture.configureByText(
+            "Sequential.java",
+            """
+            public class Sequential {
+                void ru<caret>n() { first(); }
+                void first() { second(); }
+                void second() { third(); }
+                void third() { }
+            }
+            """.trimIndent(),
+        )
+        startFromCaret()
+        assertEquals(FlowResultStatus.COMPLETED, awaitTerminal().status)
+
+        FlowRunHooks.beforeFrameOperation = {
+            FlowRunHooks.reset()
+            service.cancelActive()
+        }
+        val runId = startFromCaret()
+        val result = withTimeoutOrNull(20_000) {
+            service.results.first { it?.runId == runId && it.isTerminal }
+        }
+        assertTrue(
+            "the second run must not complete: ${result?.status}",
+            result == null || result.status != FlowResultStatus.COMPLETED,
+        )
+    }
+
+    fun `test a stop pressed before the run is launched still cancels it`() = runBlocking {
+        // startAnalysis publishes the run id before it has a job to cancel, so a
+        // Stop that lands in that window used to be dropped and the run carried
+        // on. CI found this through a test that cancelled at the first frame.
+        myFixture.configureByText(
+            "Stoppable.java",
+            """
+            public class Stoppable {
+                void ru<caret>n() { first(); }
+                void first() { second(); }
+                void second() { third(); }
+                void third() { fourth(); }
+                void fourth() { }
+            }
+            """.trimIndent(),
+        )
+        FlowRunHooks.beforeFrameOperation = {
+            FlowRunHooks.reset()
+            service.cancelActive()
+        }
+        startFromCaret()
+        val result = withTimeoutOrNull(20_000) {
+            service.results.first { it != null && it.isTerminal }
+        }
+        assertTrue(
+            "the run must not report itself completed: ${result?.status}",
+            result == null || result.status != FlowResultStatus.COMPLETED,
+        )
     }
 
     fun `test full run produces ordered root frame and analyzable child frames`() {

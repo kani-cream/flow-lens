@@ -49,6 +49,15 @@ class FlowCanvas : JComponent() {
     var onNavigateToCallSite: (CardVM, Boolean) -> Unit = { _, _ -> }
     var onNavigateToFrameEntry: (FrameVM, Boolean) -> Unit = { _, _ -> }
     var onContextMenu: (Point) -> Unit = {}
+
+    /** Pin or unpin the selected callable (`V0.3_SPEC.md` §4.5). */
+    var onTogglePin: (CardVM?) -> Unit = {}
+
+    /** Promote the selected call's target to the new root (`V0.3_SPEC.md` §6). */
+    var onAnalyzeFromHere: (CardVM) -> Unit = {}
+
+    /** Whether that command has anything to do for a card. */
+    var canAnalyzeFrom: (CardVM) -> Boolean = { false }
     var onEntrySelected: () -> Unit = {}
 
     private var result: FlowAnalysisResult? = null
@@ -71,6 +80,17 @@ class FlowCanvas : JComponent() {
     }
 
     /** Applies a new snapshot. Expansion/selection view state survives within a run. */
+    /**
+     * Callables the developer is tracking. Set by the controller; the canvas only
+     * marks them (`V0.3_SPEC.md` §4.9: a pin changes nothing about analysis).
+     */
+    var pinnedKeys: Set<String> = emptySet()
+        set(value) {
+            if (field == value) return
+            field = value
+            rebuild()
+        }
+
     fun setResult(newResult: FlowAnalysisResult?) {
         val runChanged = result?.runId != newResult?.runId
         result = newResult
@@ -86,6 +106,28 @@ class FlowCanvas : JComponent() {
     }
 
     fun selectedCard(): CardVM? = visibleCards.firstOrNull { it.nodeId == selectedNodeId }
+
+    /**
+     * Selects a node by id and scrolls it into view, so a status summary can be a
+     * way into the map (`V0.3_SPEC.md` §7.3). A node inside a collapsed frame is
+     * not visible and cannot be selected; the caller gets false.
+     */
+    fun selectNode(nodeId: NodeId): Boolean {
+        if (visibleCards.none { it.nodeId == nodeId }) {
+            // The node is inside a collapsed frame; open the frames on the way to
+            // it rather than failing silently.
+            val snapshot = result ?: return false
+            val path = CanvasViewModelBuilder.revealPath(snapshot, nodeId)
+            if (path.isEmpty()) return false
+            expandedNodes += path
+            rebuild()
+        }
+        val card = visibleCards.firstOrNull { it.nodeId == nodeId } ?: return false
+        select(card)
+        scrollToCard(card)
+        requestFocusInWindow()
+        return true
+    }
 
     /** The entry frame when it is the current selection, for navigation actions. */
     fun selectedEntry(): FrameVM? = rootVM?.takeIf { entrySelected }
@@ -277,7 +319,8 @@ class FlowCanvas : JComponent() {
         g2.font = JBUI.Fonts.label().asBold()
         g2.color = Palette.text
         val headerY = b.y + 21
-        g2.drawString("▶ " + frame.title, b.x + CanvasMetrics.FRAME_PADDING, headerY)
+        val entryPrefix = if (frame.pinned) "$PIN_GLYPH ▶ " else "▶ "
+        g2.drawString(entryPrefix + frame.title, b.x + CanvasMetrics.FRAME_PADDING, headerY)
         g2.font = JBUI.Fonts.smallFont()
         g2.color = Palette.mutedText
         g2.drawString(
@@ -504,7 +547,11 @@ class FlowCanvas : JComponent() {
         }
         val trailingWidth = b.x + b.width - rightEdge
 
-        val prefix = listOfNotNull(card.stateGlyph, card.executionGlyph).joinToString(" ")
+        val prefix = listOfNotNull(
+            PIN_GLYPH.takeIf { card.pinned },
+            card.stateGlyph,
+            card.executionGlyph,
+        ).joinToString(" ")
         g2.font = JBUI.Fonts.label()
         g2.color = when (card.style) {
             CardStyle.LIMIT, CardStyle.CYCLE -> Palette.mutedText
@@ -730,7 +777,7 @@ class FlowCanvas : JComponent() {
     }
 
     private fun rebuild() {
-        rootVM = result?.let { CanvasViewModelBuilder.build(it, expandedNodes) }
+        rootVM = result?.let { CanvasViewModelBuilder.build(it, expandedNodes, pinnedKeys) }
         visibleCards = CanvasViewModelBuilder.visibleCards(rootVM)
         visibleFrames = CanvasViewModelBuilder.visibleFrames(rootVM)
         val selected = selectedNodeId
@@ -780,6 +827,9 @@ class FlowCanvas : JComponent() {
     }
 
     companion object {
+        /** Marks a callable the developer is tracking (`V0.3_SPEC.md` §4). */
+        const val PIN_GLYPH = "★"
+
         private const val SELECTION_RING_GAP = 3
         private val SOLID_STROKE = BasicStroke(1.4f)
         private val DASHED_STROKE = BasicStroke(

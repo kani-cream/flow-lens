@@ -124,6 +124,7 @@ internal class FlowAnalysisRun(
             frames@ while (!queue.isEmpty) {
                 currentCoroutineContext().ensureActive()
                 val task = queue.dequeue() ?: break
+                currentCallable = modelBuilder.frameSymbol(task.frameId)?.displayName
                 progress(
                     when {
                         isIndexing() -> FlowProgressStage.WAITING_FOR_INDEXES
@@ -481,6 +482,11 @@ internal class FlowAnalysisRun(
                 put(FlowMetadata.ORIGIN, target.sourceOrigin.name)
                 if (target.inTestSource) put(FlowMetadata.TEST_SOURCE, "true")
                 if (call.conditional) put(FlowMetadata.CONDITIONAL, "true")
+                if (target.hasAnalyzableBody &&
+                    target.resolutionStatus == ResolutionStatus.PROJECT_LOCAL
+                ) {
+                    put(FlowMetadata.ANALYZABLE, "true")
+                }
             }
             val recursable = TraversalPolicy.mayEnterBody(
                 TargetFacts(
@@ -537,6 +543,9 @@ internal class FlowAnalysisRun(
      */
     private suspend fun isIndexing(): Boolean = readAction { DumbService.getInstance(project).isDumb }
 
+    /** What the run is working on, for the stage line. Never logged. */
+    private var currentCallable: String? = null
+
     private fun progress(stage: FlowProgressStage) {
         publishProgress(buildProgress(stage))
     }
@@ -553,6 +562,8 @@ internal class FlowAnalysisRun(
             externalCount = externalCount,
             unresolvedCount = unresolvedCount,
             elapsedMillis = (System.nanoTime() - startNanos) / 1_000_000,
+            currentCallable = currentCallable,
+            nodeBudget = limits.maxNodes,
         )
 
     private fun logRunSummary(status: FlowResultStatus) {

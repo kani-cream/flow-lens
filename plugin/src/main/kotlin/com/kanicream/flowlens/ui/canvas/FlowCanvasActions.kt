@@ -51,6 +51,21 @@ class FlowCanvasActions(private val canvas: FlowCanvas, parent: Disposable) {
         canvasAction("flow.action.toggle.expansion", KeyEvent.VK_SPACE, 0) {
             canvas.selectedCard()?.let(canvas::toggleExpansion)
         },
+        // A pin marks the callable, so the entry can be pinned as well as a call.
+        canvasAction("flow.action.toggle.pin", KeyEvent.VK_P, menuMask()) {
+            canvas.onTogglePin(canvas.selectedCard())
+        },
+        canvasAction(
+            "flow.action.analyze.from.here",
+            KeyEvent.VK_B,
+            menuMask(),
+            // An external, unresolved, or body-less target offers nothing to
+            // analyze, so the command says so instead of quietly doing nothing
+            // (`V0.3_SPEC.md` §6.1).
+            isEnabled = { canvas.selectedCard()?.let(canvas.canAnalyzeFrom) == true },
+        ) {
+            canvas.selectedCard()?.let(canvas.onAnalyzeFromHere)
+        },
     )
 
     private fun navigateToSelection(takeFocus: Boolean) {
@@ -109,9 +124,11 @@ class FlowCanvasActions(private val canvas: FlowCanvas, parent: Disposable) {
         textKey: String,
         keyCode: Int?,
         modifiers: Int,
+        isEnabled: () -> Boolean = { true },
         perform: () -> Unit,
     ): CanvasAction = CanvasAction(
         id = textKey,
+        isEnabled = isEnabled,
         text = FlowLensBundle.message("${textKey}.text"),
         description = FlowLensBundle.message("${textKey}.description"),
         shortcuts = keyCode
@@ -133,10 +150,15 @@ class FlowCanvasActions(private val canvas: FlowCanvas, parent: Disposable) {
         text: String,
         description: String,
         val shortcuts: ShortcutSet,
+        private val isEnabled: () -> Boolean = { true },
         private val perform: () -> Unit,
     ) : AnAction(text, description, null), DumbAware {
 
         fun performNow() = perform()
+
+        override fun update(e: AnActionEvent) {
+            e.presentation.isEnabled = isEnabled()
+        }
 
         fun register(component: javax.swing.JComponent, parent: Disposable) {
             if (shortcuts.shortcuts.isEmpty()) return

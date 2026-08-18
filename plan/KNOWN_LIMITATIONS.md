@@ -339,7 +339,50 @@ misleading.
 
 ---
 
-## 29. Maintenance rule
+## 29. A stored entry does not follow a refactor (v0.3)
+
+Pins, saved flows, and recents store a symbol key — language, qualifier, name,
+parameter types — plus a project-relative path. That survives editing anywhere
+in the file, moving the declaration within it, and any change that leaves the
+signature and path alone.
+
+It does not survive a rename, a signature change, or a moved file. The entry is
+then reported as not found and is disabled; nothing tries to match a similar
+name. Guessing would make every other mark untrustworthy, which is the whole
+value of a mark.
+
+Overloads are distinguished by parameter types as written, so changing a
+parameter type breaks the identity even when the code is otherwise unchanged.
+
+---
+
+## 30. A pin marks a callable, not a call site (v0.3)
+
+Pinning `charge()` marks every card whose target is `charge()`, in every flow.
+There is no way to mark one call to it and not another.
+
+Pins are project-scoped and not shareable in v0.3.
+
+---
+
+## 31. The budget bar is not a progress bar (v0.3)
+
+An analysis explores; the total is unknown until it finishes. The bar shows how
+much of the node budget is spent, which is the only denominator that exists
+during a run. A full bar means truncation is imminent, not that the work is
+nearly done.
+
+---
+
+## 32. Recents are a capped list, not a history (v0.3)
+
+The ten most recent entry points, ordered by recency, with no search and no
+record of when or how often a flow was analyzed. A cancelled run is not
+recorded, so the list describes finished work only.
+
+---
+
+## 33. Maintenance rule
 
 Whenever dogfooding, fixture testing, Plugin Verifier, or a user report reveals a surprising but currently accepted behavior:
 

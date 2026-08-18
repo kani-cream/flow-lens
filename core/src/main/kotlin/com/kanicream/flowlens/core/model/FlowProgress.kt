@@ -30,6 +30,18 @@ data class FlowProgress(
     val externalCount: Int,
     val unresolvedCount: Int,
     val elapsedMillis: Long,
+    /**
+     * The callable being analyzed right now, for display. A run that appears
+     * stuck should be able to say what it is stuck on (`V0.3_SPEC.md` §7.1).
+     * Display only: the logged summary stays counters (guardrails §13).
+     */
+    val currentCallable: String? = null,
+    /**
+     * The run's node budget, so the UI can show how much of it is spent. An
+     * exploration has no knowable total, so this is the only honest denominator
+     * (`V0.3_SPEC.md` §7.2).
+     */
+    val nodeBudget: Int = 0,
 ) {
     val isTerminal: Boolean
         get() = when (stage) {

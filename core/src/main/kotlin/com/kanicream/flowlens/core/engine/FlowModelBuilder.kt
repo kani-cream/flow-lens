@@ -218,6 +218,9 @@ class FlowModelBuilder(
         )
     }
 
+    /** The callable a frame belongs to, for progress display. */
+    fun frameSymbol(frameId: FrameId): FlowSymbol? = frames[frameId]?.symbol
+
     fun markFrameComplete(frameId: FrameId) {
         frames.getValue(frameId).bodyComplete = true
     }
