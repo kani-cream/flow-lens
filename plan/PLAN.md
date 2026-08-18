@@ -655,10 +655,10 @@ Detailed semantics are in `plan/V0.1_SPEC.md`.
 - Mermaid sequence export where semantically valid.
 - copy structured context for external tools/AI.
 
-### v0.5 — Async Semantics
+### v0.5 — Async Semantics — delivered 2026-08-19
 
 Scoped by the owner on 2026-08-18 to one theme, and the last milestone that adds
-capability.
+capability. Results in `V0.5_RESULTS.md`.
 
 - callback bodies — a lambda, trailing lambda, or function literal handed to a
   call becomes a visible event owning its body;
@@ -667,9 +667,14 @@ capability.
 - Go parity — `go func() { … }()` and `defer func() { … }()` bodies become
   visible.
 
-This is a correctness pass rather than a feature. Today those bodies are dropped
-with no disclosure, so a map of asynchronous code looks complete and is not —
-the same failure v0.2 closed for branches. See `V0.5_SPEC.md`.
+This is a correctness pass rather than a feature. Before v0.5 those bodies were
+dropped with no disclosure, so a map of asynchronous code looked complete and was
+not — the same failure v0.2 closed for branches. See `V0.5_SPEC.md`.
+
+What it does not do is decide the timing by understanding the code. Three things
+justify an answer — Kotlin's `inline` rule, Go's `go`/`defer` keywords, and a
+documented list of APIs — and everything else is `UNKNOWN`, said out loud rather
+than guessed (`KNOWN_LIMITATIONS.md` §39–44).
 
 ### v1.0 — Stabilization and release
 
