@@ -273,7 +273,51 @@ either way.
 
 ---
 
-## 25. Maintenance rule
+## 25. Structure is not reachability (v0.2)
+
+v0.2 shows which events are alternatives and which repeat. It does not decide
+whether a path can actually be taken.
+
+The consequences:
+
+- events after a structure are shown even when every branch returns or throws;
+- loop containers do not express iteration counts, and a loop that never runs
+  looks the same as one that always does;
+- a condition is never evaluated, folded, or eliminated.
+
+---
+
+## 26. Control flow v0.2 does not represent (v0.2)
+
+These constructs are visible in the source but not in the map. Each keeps the
+result marked as control-flow-incomplete, which is what that disclosure now
+means:
+
+- Java `switch` fall-through: each case reads as independent, so a case without
+  `break` does not show the next case running after it;
+- `break` and `continue` are not drawn as edges out of a structure, labelled or
+  otherwise;
+- a `catch` section is not connected to the `throw` that could reach it;
+- short-circuit operands (`a() && b()`), elvis (`?:`), and safe calls (`?.`)
+  keep the v0.1 conditional marker instead of becoming structures;
+- Go `select` shows its cases, not which one a scheduler picks, nor blocking or
+  channel direction.
+
+---
+
+## 27. Branch labels and condition summaries are source text, truncated (v0.2)
+
+A section label (`case 1`, `catch (IOException)`) and a structure's condition
+summary are short excerpts of the source, collapsed to a single line and cut at
+a fixed length. A long condition is therefore recognizable but not readable in
+full; the card navigates to the source, which is the readable copy.
+
+They are display data only. Like every other source-derived string, they are
+never written to logs or diagnostics (`IMPLEMENTATION_GUARDRAILS.md` §13).
+
+---
+
+## 28. Maintenance rule
 
 Whenever dogfooding, fixture testing, Plugin Verifier, or a user report reveals a surprising but currently accepted behavior:
 

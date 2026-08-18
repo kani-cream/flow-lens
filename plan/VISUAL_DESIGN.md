@@ -409,41 +409,56 @@ Do not invent async/sync semantics beyond what the analyzer knows.
 
 ## 13. Conditions and Branches
 
-Full branch visualization begins in v0.2.
-
-Concept:
+Branches render as **stacked labelled sections inside one container**, decided by
+the owner on 2026-08-18 and implemented in v0.2.
 
 ```text
-                     │
-                     ▼
-          ◆ payment.isRequired() ?
-              ╱                 ╲
-        REQUIRED                SKIP
-           │                      │
-           ▼                      ▼
-       charge()                 skip()
-           │                      │
-           ╰──────────┬───────────╯
-                      ▼
-                    save()
+  │
+  ▼
+╭─ ◆ payment.isRequired() ? ───╮
+│  THEN                        │
+│    charge()            D0    │
+│  ELSE                        │
+│    skip()              D0    │
+╰──────────────────────────────╯
+  │   ← reconvergence
+  ▼
+save()                    D0
 ```
 
 Requirements:
 
-- condition uses a different semantic shape than a call.
-- branch labels visible.
-- reconvergence visible when statically meaningful.
-- long conditions summarized; source available in details.
+- the condition uses a different semantic shape and glyph than a call;
+- branch labels are visible, and carry the source text where one exists
+  (`case 1`, `catch (IOException)`);
+- reconvergence is visible: the connector leaving the container says the
+  sequence continues after the structure;
+- an empty section is still drawn, so "this case does nothing" stays distinct
+  from "this case is missing";
+- long conditions are summarized; the source is one navigation away.
 
-### v0.1 fallback
+### Why not a fork
 
-When v0.1 encounters unsupported structural control flow:
+This section previously showed a left/right fork. A fork needs at least two card
+widths, and the tool window is routinely narrower than that, so every `if` would
+force horizontal scrolling and a `switch` with several cases would be unusable.
+Stacking meets every requirement above at one card width, and it scales to any
+number of sections and to nesting — a nested structure lays out like any other
+event inside its section.
+
+### The v0.1 fallback, narrowed
 
 ```text
 ⚠ Control flow simplified
 ```
 
-The map must not present flattened branch calls as a proven unconditional sequence.
+v0.1 showed this whenever a branch was flattened. With structure represented, the
+disclosure appears only for control flow v0.2 genuinely does not model — a
+short-circuit operand, a `break`, a `switch` fall-through — so it now points at
+something specific rather than at every branch.
+
+The map must not present flattened branch calls as a proven unconditional
+sequence.
 
 ---
 
