@@ -45,7 +45,10 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
 
     val selectionModel = FlowSelectionModel()
     val canvas = FlowCanvas()
-    val statusView = FlowStatusView(onReanalyze = ::reanalyze)
+    val statusView = FlowStatusView(
+        onReanalyze = ::reanalyze,
+        onSelectNode = { nodeId -> canvas.selectNode(nodeId) },
+    )
     val detailsPanel = FlowDetailsPanel(
         onOpenTarget = {
             navigateTo(selectionModel.selected?.node?.preferredNavigationLocation, takeFocus = false)

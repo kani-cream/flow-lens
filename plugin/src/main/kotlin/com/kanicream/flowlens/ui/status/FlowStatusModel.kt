@@ -2,6 +2,11 @@ package com.kanicream.flowlens.ui.status
 
 import com.kanicream.flowlens.FlowLensBundle
 import com.kanicream.flowlens.core.model.FlowAnalysisResult
+import com.kanicream.flowlens.core.model.FlowNode
+import com.kanicream.flowlens.core.model.FlowNodeKind
+import com.kanicream.flowlens.core.model.NodeId
+import com.kanicream.flowlens.core.model.ResolutionStatus
+import com.kanicream.flowlens.service.FlowMetadata
 import com.kanicream.flowlens.core.model.FlowProgress
 import com.kanicream.flowlens.core.model.FlowProgressStage
 import com.kanicream.flowlens.core.model.FlowResultStatus
@@ -23,7 +28,27 @@ data class FlowStatusViewState(
     val reanalyzeEnabled: Boolean,
     val simplifiedControlFlow: Boolean,
     val diagnostics: List<String>,
+    /**
+     * How much of the node budget is spent, 0..1, or null when nothing is
+     * running. Not progress toward completion: an exploration has no knowable
+     * total, and a full bar means truncation is imminent (`V0.3_SPEC.md` §7.2).
+     */
+    /**
+     * What the run is working on, so a run that looks stuck can say on what
+     * (`V0.3_SPEC.md` §7.1). Null once the run is over.
+     */
+    val currentCallable: String? = null,
+    val budgetFraction: Double? = null,
+    /** Why the map stops where it does, most significant first (§7.3). */
+    val stopReasons: List<StopReason> = emptyList(),
 )
+
+/**
+ * One reason the map is shaped the way it is, with a way into it: activating a
+ * reason selects the first node it describes, so the summary is an entry point
+ * rather than a report.
+ */
+data class StopReason(val text: String, val count: Int, val firstNode: NodeId?)
 
 /**
  * Maps analysis lifecycle state to the status view. Result state wins over the
@@ -76,7 +101,54 @@ object FlowStatusModel {
             diagnostics = result?.diagnostics.orEmpty().map { diagnostic ->
                 FlowLensBundle.message(diagnostic.messageKey)
             }.distinct(),
+            currentCallable = progress?.currentCallable?.takeIf { running },
+            budgetFraction = progress
+                ?.takeIf { running && it.nodeBudget > 0 }
+                ?.let { (it.nodesProduced.toDouble() / it.nodeBudget).coerceIn(0.0, 1.0) },
+            stopReasons = if (running) emptyList() else stopReasonsOf(result),
         )
+    }
+
+    /**
+     * Counts the reasons the map ends where it does. A reason with no instances
+     * is omitted entirely: a run with nothing to explain shows nothing, which is
+     * what makes the presence of a line mean something (`V0.3_SPEC.md` §7.3).
+     */
+    private fun stopReasonsOf(result: FlowAnalysisResult?): List<StopReason> {
+        if (result == null || !result.isTerminal) return emptyList()
+        val nodes = result.frames.values.flatMap { frame -> allNodes(frame.events) }
+        return listOfNotNull(
+            reason("status.reason.depth.limited", nodes) {
+                it.metadata[FlowMetadata.LIMIT] == FlowMetadata.LIMIT_DEPTH
+            },
+            reason("status.reason.unresolved", nodes) {
+                it.resolutionStatus == ResolutionStatus.UNRESOLVED
+            },
+            reason("status.reason.external", nodes) {
+                it.resolutionStatus == ResolutionStatus.EXTERNAL
+            },
+            reason("status.reason.cycle", nodes) { it.kind == FlowNodeKind.CYCLE },
+            reason("status.reason.truncated", nodes) { it.kind == FlowNodeKind.LIMIT },
+        )
+    }
+
+    private fun reason(
+        key: String,
+        nodes: List<FlowNode>,
+        matches: (FlowNode) -> Boolean,
+    ): StopReason? {
+        val hits = nodes.filter(matches)
+        if (hits.isEmpty()) return null
+        return StopReason(
+            text = FlowLensBundle.message(key, hits.size),
+            count = hits.size,
+            firstNode = hits.first().id,
+        )
+    }
+
+    /** Structural nodes own branches, so a flat walk of a frame is not enough. */
+    private fun allNodes(events: List<FlowNode>): List<FlowNode> = events.flatMap { node ->
+        listOf(node) + allNodes(node.branches.flatMap { it.events })
     }
 
     private fun stageOf(status: FlowResultStatus): FlowProgressStage = when (status) {

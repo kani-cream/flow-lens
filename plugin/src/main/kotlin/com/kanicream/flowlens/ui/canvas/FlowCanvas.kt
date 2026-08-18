@@ -104,6 +104,19 @@ class FlowCanvas : JComponent() {
 
     fun selectedCard(): CardVM? = visibleCards.firstOrNull { it.nodeId == selectedNodeId }
 
+    /**
+     * Selects a node by id and scrolls it into view, so a status summary can be a
+     * way into the map (`V0.3_SPEC.md` §7.3). A node inside a collapsed frame is
+     * not visible and cannot be selected; the caller gets false.
+     */
+    fun selectNode(nodeId: NodeId): Boolean {
+        val card = visibleCards.firstOrNull { it.nodeId == nodeId } ?: return false
+        select(card)
+        scrollToCard(card)
+        requestFocusInWindow()
+        return true
+    }
+
     /** The entry frame when it is the current selection, for navigation actions. */
     fun selectedEntry(): FrameVM? = rootVM?.takeIf { entrySelected }
 

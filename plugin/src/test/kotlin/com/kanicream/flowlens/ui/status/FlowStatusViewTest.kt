@@ -1,6 +1,7 @@
 package com.kanicream.flowlens.ui.status
 
 import com.intellij.testFramework.fixtures.BasePlatformTestCase
+import com.kanicream.flowlens.core.model.NodeId
 import java.awt.Dimension
 
 /**
@@ -44,6 +45,51 @@ class FlowStatusViewTest : BasePlatformTestCase() {
                 view.components.filter { it.isVisible }.all { it.y + it.height <= singleRow },
             )
         }
+    }
+
+    fun `test the reasons row appears only when there is something to explain`() {
+        val view = FlowStatusView(onReanalyze = {})
+        view.apply(state())
+        val withoutReasons = view.preferredSize.height
+
+        view.apply(
+            state().copy(
+                stopReasons = listOf(StopReason("Outside the project: 3", 3, NodeId(7))),
+            ),
+        )
+        assertTrue(
+            "a reason needs a row of its own; sharing the summary's row is what clipped it",
+            view.preferredSize.height > withoutReasons,
+        )
+
+        view.apply(state())
+        assertEquals(
+            "and the row goes away again, so a clean run costs no height",
+            withoutReasons,
+            view.preferredSize.height,
+        )
+    }
+
+    fun `test a reason selects the node it describes`() {
+        val selected = mutableListOf<NodeId>()
+        val view = FlowStatusView(onReanalyze = {}, onSelectNode = { selected += it })
+        view.apply(
+            state().copy(
+                stopReasons = listOf(StopReason("Could not be resolved: 2", 2, NodeId(4))),
+            ),
+        )
+        val link = view.components
+            .filterIsInstance<javax.swing.JPanel>()
+            .flatMap { it.components.toList() }
+            .filterIsInstance<com.intellij.ui.components.ActionLink>()
+            .first { it.text.contains("resolved") }
+        link.doClick()
+
+        assertEquals(
+            "the summary is a way into the map, not a report about it",
+            listOf(NodeId(4)),
+            selected,
+        )
     }
 
     fun `test a narrow strip shortens its text instead of dropping it`() {
