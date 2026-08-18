@@ -3,6 +3,7 @@ package com.kanicream.flowlens.dispatch
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
 import com.intellij.psi.search.searches.DefinitionsScopedSearch
+import com.intellij.util.Processor
 import com.kanicream.flowlens.analysis.FlowAnalyzerRegistry
 import com.kanicream.flowlens.core.model.FlowSymbol
 import com.kanicream.flowlens.workflow.FlowEntryRef
@@ -44,29 +45,38 @@ object CandidateFinder {
         val found = LinkedHashMap<String, DispatchCandidate>()
         var partial = false
 
-        // Iterating the query rather than collecting it keeps the search lazy, so
-        // a type with hundreds of implementations stops at the cap.
-        for (candidate in DefinitionsScopedSearch.search(declaration)) {
-            // Only an implementation that could actually be followed is worth
-            // offering: a library or body-less one would be chosen and then stop
-            // (`V0.4_SPEC.md` §3.3).
-            val analyzer = FlowAnalyzerRegistry.forDeclaration(candidate) ?: continue
-            if (!analyzer.hasAnalyzableBody(candidate)) continue
-            val file = candidate.containingFile?.virtualFile ?: continue
-            if (!FlowEntryRef.isInsideProject(project, file)) continue
-
-            val symbol = analyzer.describeCallable(candidate)
-            if (!FlowEntryRef.isStorable(symbol)) continue
-            if (symbol.key == describeSelf(declaration)) continue
-
-            found[symbol.key] = DispatchCandidate(symbol, FlowEntryRef.of(symbol, project, file))
-            // Searching one past the cap lets the caller say the list is partial
-            // rather than guess.
-            if (found.size > MAX_CANDIDATES) {
-                partial = true
-                break
-            }
-        }
+        // forEach with a processor rather than iterating the query: Query.iterator
+        // is scheduled for removal, and the processor form is also what lets the
+        // search stop at the cap instead of enumerating a whole hierarchy.
+        DefinitionsScopedSearch.search(declaration).forEach(
+            Processor { candidate ->
+                // Only an implementation that could actually be followed is worth
+                // offering: a library or body-less one would be chosen and then
+                // stop (`V0.4_SPEC.md` §3.3).
+                val analyzer = FlowAnalyzerRegistry.forDeclaration(candidate)
+                val file = candidate.containingFile?.virtualFile
+                if (analyzer == null ||
+                    !analyzer.hasAnalyzableBody(candidate) ||
+                    file == null ||
+                    !FlowEntryRef.isInsideProject(project, file)
+                ) {
+                    return@Processor true
+                }
+                val symbol = analyzer.describeCallable(candidate)
+                if (!FlowEntryRef.isStorable(symbol) || symbol.key == describeSelf(declaration)) {
+                    return@Processor true
+                }
+                found[symbol.key] = DispatchCandidate(symbol, FlowEntryRef.of(symbol, project, file))
+                // Searching one past the cap lets the caller say the list is
+                // partial rather than guess.
+                if (found.size > MAX_CANDIDATES) {
+                    partial = true
+                    false
+                } else {
+                    true
+                }
+            },
+        )
 
         val candidates = found.values
             .sortedWith(compareBy({ it.symbol.containerName ?: "" }, { it.symbol.displayName }))

@@ -58,6 +58,12 @@ class FlowCanvas : JComponent() {
 
     /** Whether that command has anything to do for a card. */
     var canAnalyzeFrom: (CardVM) -> Boolean = { false }
+
+    /** Offer the implementations an ambiguous call could reach (`V0.4_SPEC.md` §3). */
+    var onChooseImplementation: (CardVM) -> Unit = {}
+
+    /** Whether that card is a call whose continuation could be chosen. */
+    var canChooseImplementation: (CardVM) -> Boolean = { false }
     var onEntrySelected: () -> Unit = {}
 
     private var result: FlowAnalysisResult? = null

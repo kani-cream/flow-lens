@@ -56,6 +56,14 @@ class FlowCanvasActions(private val canvas: FlowCanvas, parent: Disposable) {
             canvas.onTogglePin(canvas.selectedCard())
         },
         canvasAction(
+            "flow.action.choose.implementation",
+            null,
+            0,
+            isEnabled = { canvas.selectedCard()?.let(canvas.canChooseImplementation) == true },
+        ) {
+            canvas.selectedCard()?.let(canvas.onChooseImplementation)
+        },
+        canvasAction(
             "flow.action.analyze.from.here",
             KeyEvent.VK_B,
             menuMask(),

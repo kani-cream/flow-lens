@@ -399,7 +399,46 @@ and can be deleted and re-created.
 
 ---
 
-## 34. Maintenance rule
+## 34. A dispatch choice is per callable (v0.4)
+
+Choosing an implementation for `Gateway.charge()` applies to every call to it in
+the flow. Two call sites of the same interface method cannot be given different
+choices, because a choice is keyed by the callable — which is how the decision
+is actually made, and what lets it survive the re-analysis it triggers.
+
+Choices are not persisted; they last for the session.
+
+---
+
+## 35. A candidate is not evidence (v0.4)
+
+The implementations offered for an ambiguous call are the declarations the IDE
+can find. Runtime substitution — dependency injection, proxies, reflection,
+service loaders — is invisible to that search.
+
+So a listed candidate is not evidence that it runs, and an empty list is not
+evidence that nothing does. This is why choosing one never changes the call's
+dispatch confidence: the map keeps saying the call is ambiguous, and separately
+says whose body is being shown.
+
+The list is also capped at 20, and a project with more implementations sees part
+of it, labelled as partial.
+
+---
+
+## 36. Exports are Markdown and Mermaid only (v0.4)
+
+`PLAN.md` §17 also lists a Mermaid sequence export and a structured context
+format for external tools. Both were deferred on 2026-08-18: a sequence diagram
+implies participants exchanging ordered messages, which a branching flow is not,
+and a context format is worth designing against a real consumer.
+
+A Mermaid diagram of a deep flow is wide; the export does not lay it out or
+paginate.
+
+---
+
+## 37. Maintenance rule
 
 Whenever dogfooding, fixture testing, Plugin Verifier, or a user report reveals a surprising but currently accepted behavior:
 

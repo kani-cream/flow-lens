@@ -14,6 +14,10 @@ import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.ui.Messages
 import javax.swing.JComponent
 import com.kanicream.flowlens.FlowLensBundle
+import com.kanicream.flowlens.core.model.DispatchConfidence
+import com.kanicream.flowlens.dispatch.CandidateFinder
+import com.kanicream.flowlens.dispatch.DispatchChoice
+import com.kanicream.flowlens.dispatch.DispatchChoices
 import com.kanicream.flowlens.core.model.FlowLimits
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.workflow.FlowEntryLauncher
@@ -89,6 +93,9 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
         canvas.onTogglePin = ::togglePin
         canvas.onAnalyzeFromHere = ::analyzeFromHere
         canvas.canAnalyzeFrom = ::canAnalyzeFrom
+        canvas.canChooseImplementation = ::canChooseImplementation
+        canvas.onChooseImplementation = ::chooseImplementation
+        choices.onChanged = { reanalyzeForChoices() }
         flows.onChanged = { refreshPins() }
         refreshPins()
         selectionModel.addListener { card: CardVM? -> detailsPanel.show(card?.node) }
@@ -123,6 +130,15 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
 
     override fun showFlows(component: JComponent, x: Int, y: Int) {
         flowsMenu.show(component, x, y)
+    }
+
+    override fun canExport(): Boolean = service.results.value?.let {
+        it.isTerminal && it.rootFrame != null
+    } == true
+
+    override fun export(format: ExportFormat): Boolean {
+        val result = service.results.value ?: return false
+        return FlowExport.copy(project, result, format)
     }
 
     // ---- workflow commands ----
@@ -212,6 +228,78 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
     private fun canAnalyzeFrom(card: CardVM): Boolean =
         card.node.targetLocation != null &&
             card.node.metadata[FlowMetadata.ANALYZABLE] == "true"
+
+    // ---- dispatch choices ----
+
+    private val choices get() = DispatchChoices.getInstance(project)
+
+    /**
+     * A call whose continuation could be chosen: one the traversal did not enter
+     * and whose declaration can be searched for implementations.
+     */
+    private fun canChooseImplementation(card: CardVM): Boolean =
+        card.node.targetLocation != null &&
+            card.node.targetFrameId == null &&
+            card.node.dispatchConfidence != DispatchConfidence.EXACT
+
+    /**
+     * Offers the implementations this call could reach and records the reader's
+     * pick. Discovery happens here rather than during analysis, so a run does
+     * not pay for a hierarchy search per ambiguous node (`V0.4_SPEC.md` §3.1).
+     */
+    private fun chooseImplementation(card: CardVM) {
+        val symbol = card.node.targetSymbol ?: return
+        val location = card.node.targetLocation ?: return
+        val runId = currentRunId ?: return
+        val pointer = service.navigationPointer(runId, location.handle) ?: return
+
+        val found = runReadActionBlocking {
+            val declaration = pointer.element?.takeIf { it.isValid }
+                ?: return@runReadActionBlocking null
+            CandidateFinder.find(project, declaration)
+        } ?: return
+
+        if (found.isEmpty) {
+            Messages.showInfoMessage(
+                project,
+                FlowLensBundle.message("choose.none.message", symbol.displayName),
+                FlowLensBundle.message("choose.title"),
+            )
+            return
+        }
+
+        val message = if (found.partial) {
+            FlowLensBundle.message("choose.message.partial", symbol.displayName, found.candidates.size)
+        } else {
+            FlowLensBundle.message("choose.message", symbol.displayName)
+        }
+        val dialog = ChooseImplementationDialog(
+            project = project,
+            message = message,
+            candidates = found.candidates,
+            caveat = FlowLensBundle.message("choose.caveat"),
+        )
+        if (!dialog.showAndGet()) return
+        val candidate = dialog.chosen() ?: return
+
+        choices.choose(
+            DispatchChoice(
+                fromKey = symbol.key,
+                fromDisplayName = listOfNotNull(symbol.containerName, symbol.displayName)
+                    .joinToString("."),
+                to = candidate.entry,
+            ),
+        )
+    }
+
+    /**
+     * A choice changes what the traversal may enter, so the map is produced
+     * again rather than grafted onto (`V0.4_SPEC.md` §4.2).
+     */
+    private fun reanalyzeForChoices() {
+        if (service.results.value?.rootFrame == null) return
+        service.reanalyze()
+    }
 
     /** Opens a stored entry, reporting rather than guessing when it is gone. */
     fun openEntry(ref: FlowEntryRef, limits: FlowLimits?): LaunchOutcome {
@@ -317,6 +405,7 @@ class FlowLensController(private val project: Project) : Disposable, FlowToolbar
         // The store outlives the tool window, so a listener left installed would
         // hold the whole disposed Swing tree (guardrails §15).
         flows.onChanged = {}
+        choices.onChanged = {}
     }
 
     private companion object {

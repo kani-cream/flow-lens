@@ -2,6 +2,7 @@ package com.kanicream.flowlens.ui
 
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.ActionToolbar
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
@@ -44,12 +45,19 @@ class FlowToolbar(
 
         /** Shows the saved flows, recents, and pins (`V0.3_SPEC.md` §4–5). */
         fun showFlows(component: JComponent, x: Int, y: Int)
+
+        /** Copies the current flow in [format]; false when there is nothing to copy. */
+        fun export(format: ExportFormat): Boolean
+
+        /** Whether there is a finished result to export (`V0.4_SPEC.md` §5.6). */
+        fun canExport(): Boolean
     }
 
     private val group = DefaultActionGroup(
         AnalyzeAction(),
         StopAction(),
         FlowsAction(),
+        ExportAction(),
         Separator.getInstance(),
         ZoomOutAction(),
         ZoomLevelAction(),
@@ -91,6 +99,46 @@ class FlowToolbar(
         override fun actionPerformed(e: AnActionEvent) {
             val source = e.inputEvent?.component as? JComponent ?: return
             commands.showFlows(source, 0, source.height)
+        }
+    }
+
+    /**
+     * Export is a submenu rather than two toolbar buttons: it is used at the end
+     * of a reading session, not during one, and the toolbar is already the
+     * narrowest part of the tool window.
+     */
+    private inner class ExportAction : AnAction(
+        FlowLensBundle.message("action.export.text"),
+        FlowLensBundle.message("action.export.description"),
+        AllIcons.ToolbarDecorator.Export,
+    ), DumbAware {
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+
+        override fun update(e: AnActionEvent) {
+            e.presentation.isEnabled = commands.canExport()
+        }
+
+        override fun actionPerformed(e: AnActionEvent) {
+            val source = e.inputEvent?.component as? JComponent ?: return
+            val group = DefaultActionGroup(
+                FormatAction("action.export.markdown", ExportFormat.MARKDOWN),
+                FormatAction("action.export.mermaid", ExportFormat.MERMAID),
+            )
+            ActionManager.getInstance()
+                .createActionPopupMenu(ActionPlaces.POPUP, group)
+                .component
+                .show(source, 0, source.height)
+        }
+    }
+
+    private inner class FormatAction(
+        textKey: String,
+        private val format: ExportFormat,
+    ) : AnAction(FlowLensBundle.message(textKey), null, null), DumbAware {
+        override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+
+        override fun actionPerformed(e: AnActionEvent) {
+            commands.export(format)
         }
     }
 
