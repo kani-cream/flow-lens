@@ -35,8 +35,12 @@ class V03AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
     private val sample = """
         public class Orders {
             void purchase() { save(); helper.help(); "x".trim(); }
-            void refund() { save(); }
+            void refund() { first(); }
             void save() { }
+            void first() { second(); }
+            void second() { third(); }
+            void third() { fourth(); }
+            void fourth() { }
             Helper helper = new Helper();
         }
 
@@ -82,11 +86,15 @@ class V03AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
         analyze("void purchase()")
         val before = recents.recents().map { it.entry.key }
 
-        // Cancelling from the scheduler rather than from the test thread: a race
-        // between start and cancel would decide whether this test tests anything.
-        FlowRunHooks.beforeFrameOperation = {
-            FlowRunHooks.reset()
-            service.cancelActive()
+        // Cancelling from the scheduler rather than from the test thread, and not
+        // at the first operation: startAnalysis adopts the job only after the run
+        // is launched, so cancelling at operation 0 can arrive before there is a
+        // job to cancel and the run finishes normally. CI found that race.
+        FlowRunHooks.beforeFrameOperation = { operation ->
+            if (operation.index >= 2) {
+                FlowRunHooks.reset()
+                service.cancelActive()
+            }
         }
         val entry = "void refund()"
         val offset = myFixture.file.text.indexOf(entry) + entry.length - 2
@@ -97,7 +105,7 @@ class V03AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
             withTimeoutOrNull(10_000) { service.results.first { it?.runId == runId && it.isTerminal } }
         }
         assertTrue(
-            "a cancelled run must not report itself completed",
+            "the run must have stopped short: ${result?.status}",
             result == null || result.status == FlowResultStatus.CANCELLED,
         )
         assertEquals(

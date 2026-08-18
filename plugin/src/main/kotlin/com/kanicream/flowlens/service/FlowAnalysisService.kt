@@ -44,6 +44,14 @@ class FlowAnalysisService(
     private var activeJob: Job? = null
     private var activeRunId: RunId? = null
     private var activeHandles: RunHandles? = null
+
+    /**
+     * A cancel that arrived before the job existed. `startAnalysis` publishes the
+     * run id before launching, so Stop pressed in that window used to cancel
+     * nothing — the run simply carried on. CI found this through a test that
+     * cancelled at the first frame operation.
+     */
+    private var cancelRequestedFor: RunId? = null
     private var lastRequest: AnalysisRequest? = null
 
     /** The root request of the current run, kept so it can be repeated. */
@@ -88,6 +96,7 @@ class FlowAnalysisService(
             activeRunId = runId
             activeHandles = handles
             lastRequest = AnalysisRequest(file, offset, effectiveLimits, relativePath)
+            cancelRequestedFor = null
             // The old flow stops being current the moment a new root is requested
             // (REPO_LENS_LESSONS.md 3.6).
             mutableResults.value = null
@@ -106,8 +115,14 @@ class FlowAnalysisService(
         )
         val job = scope.launch(Dispatchers.Default) { run.execute() }
         synchronized(lock) {
-            // Only adopt the job if this run is still the current one.
-            if (activeRunId == runId) activeJob = job else job.cancel()
+            when {
+                activeRunId != runId -> job.cancel()
+                cancelRequestedFor == runId -> {
+                    cancelRequestedFor = null
+                    job.cancel()
+                }
+                else -> activeJob = job
+            }
         }
         return runId
     }
@@ -117,7 +132,13 @@ class FlowAnalysisService(
 
     /** Cooperative cancellation; completed nodes stay navigable. */
     fun cancelActive() {
-        synchronized(lock) { activeJob }?.cancel()
+        val job = synchronized(lock) {
+            // Remember the request even when there is no job yet, so a run that is
+            // still being launched is cancelled the moment it can be.
+            if (activeJob == null) cancelRequestedFor = activeRunId
+            activeJob
+        }
+        job?.cancel()
     }
 
     /**
