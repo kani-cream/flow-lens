@@ -161,11 +161,13 @@ object MermaidExporter {
     private fun escape(text: String): String = buildString {
         for (ch in text) {
             when (ch) {
+                // A label is quoted, so only what could close the quote or inject
+                // markup needs escaping. Escaping parentheses as well turned every
+                // call into "purchase#40;#41;", which is unreadable for no gain.
                 '"' -> append("#quot;")
                 '<' -> append("#lt;")
                 '>' -> append("#gt;")
                 '#' -> append("#35;")
-                '[', ']', '(', ')', '{', '}' -> append("#").append(ch.code).append(";")
                 '\n', '\r' -> append(" ")
                 else -> append(ch)
             }

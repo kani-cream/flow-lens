@@ -154,6 +154,15 @@ class ExportTest {
     }
 
     @Test
+    fun `a call reads as a call, not as escape sequences`() {
+        // Escaping parentheses turned every node into "purchase#40;#41;". A label
+        // is quoted, so only what could close the quote or inject markup needs it.
+        val mermaid = MermaidExporter.export(request())
+        assertTrue(mermaid.contains("""["purchase()"]"""), mermaid)
+        assertFalse(mermaid.contains("#40;"), mermaid)
+    }
+
+    @Test
     fun `P a structure becomes a subgraph`() {
         val mermaid = MermaidExporter.export(request())
         assertTrue(mermaid.contains("subgraph s0"), mermaid)

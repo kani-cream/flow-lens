@@ -579,8 +579,11 @@ class FlowCanvas : JComponent() {
             // still truncated the name, which is the wrong thing to lose — the
             // note's content is also in the tooltip, the details panel, the body
             // header below, and both exports.
+            // TITLE_MARGIN is what the name's own drawing subtracts below; leaving
+            // it out let a marginal note squeeze in and truncate the name anyway,
+            // which is the failure this whole rule exists to prevent.
             val nameWidth = nameWidth(g2, card)
-            val room = rightEdge - b.x - nameWidth - NOTE_GAP * 2
+            val room = rightEdge - b.x - nameWidth - TITLE_MARGIN - NOTE_GAP
             val shown = if (room >= JBUI.scale(MIN_NOTE_WIDTH)) truncate(g2, note, room) else null
             if (shown != null) {
                 val noteWidth = g2.fontMetrics.stringWidth(shown)
@@ -600,7 +603,7 @@ class FlowCanvas : JComponent() {
             CardStyle.LIMIT, CardStyle.CYCLE -> Palette.mutedText
             else -> Palette.text
         }
-        val available = b.width - trailingWidth - 26
+        val available = b.width - trailingWidth - TITLE_MARGIN
         val text = if (prefix.isEmpty()) card.title else "$prefix ${card.title}"
         g2.drawString(truncate(g2, text, available), b.x + 12, baseline)
     }
@@ -877,6 +880,9 @@ class FlowCanvas : JComponent() {
         private const val MIN_NOTE_WIDTH = 44
 
         private const val NOTE_GAP = 6
+
+        /** The name's own left inset plus breathing room on the right. */
+        private const val TITLE_MARGIN = 26
 
         private const val SELECTION_RING_GAP = 3
         private val SOLID_STROKE = BasicStroke(1.4f)
