@@ -114,7 +114,8 @@ diagram (v0.4).
 | v0.2 — control flow | done | `plan/V0.2_RESULTS.md` |
 | v0.3 — developer workflow | done | `plan/V0.3_RESULTS.md` |
 | v0.4 — ambiguity and sharing | done | `plan/V0.4_RESULTS.md` |
-| v0.5 — advanced exploration | next | `plan/PLAN.md` §17 |
+| v0.5 — async semantics | next | `plan/V0.5_SPEC.md` |
+| v1.0 — stabilization and release | planned | `plan/PLAN.md` §17 |
 
 Plugin Verifier reports zero compatibility, deprecated, experimental, and
 internal API usages against both the minimum and latest supported builds.
