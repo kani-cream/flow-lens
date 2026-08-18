@@ -10,6 +10,9 @@ import com.kanicream.flowlens.core.model.FlowLimits
 import com.kanicream.flowlens.core.model.FlowProgress
 import com.kanicream.flowlens.core.model.LocationId
 import com.kanicream.flowlens.core.model.RunId
+import com.kanicream.flowlens.core.model.FlowResultStatus
+import com.kanicream.flowlens.workflow.FlowEntryRef
+import com.kanicream.flowlens.workflow.FlowLensRecents
 import com.kanicream.flowlens.settings.FlowLensSettings
 import com.intellij.psi.PsiElement
 import kotlinx.coroutines.CoroutineScope
@@ -45,6 +48,7 @@ class FlowAnalysisService(
     private data class AnalysisRequest(
         val file: VirtualFile,
         val offset: Int,
+        val limits: FlowLimits,
         val rootHandle: LocationId? = null,
     )
 
@@ -74,7 +78,7 @@ class FlowAnalysisService(
             previous = activeJob
             activeRunId = runId
             activeHandles = handles
-            lastRequest = AnalysisRequest(file, offset)
+            lastRequest = AnalysisRequest(file, offset, effectiveLimits)
             // The old flow stops being current the moment a new root is requested
             // (REPO_LENS_LESSONS.md 3.6).
             mutableResults.value = null
@@ -117,7 +121,7 @@ class FlowAnalysisService(
             pointer?.element?.takeIf { it.isValid }?.textOffset ?: request.offset
         }
         if (!request.file.isValid) return null
-        return startAnalysis(request.file, offset)
+        return startAnalysis(request.file, offset, request.limits)
     }
 
     /** Resolves a neutral location handle for navigation. Current run only. */
@@ -130,14 +134,33 @@ class FlowAnalysisService(
 
     /** Internal for lifecycle tests: events from a non-current run must be dropped. */
     internal fun acceptResult(event: FlowAnalysisResultEvent) {
-        synchronized(lock) {
+        val finished = synchronized(lock) {
             if (activeRunId != event.runId) return
             mutableResults.value = event.result
             val rootHandle = event.result.rootFrame?.entryLocation?.handle
             if (rootHandle != null && lastRequest?.rootHandle == null) {
                 lastRequest = lastRequest?.copy(rootHandle = rootHandle)
             }
+            if (event.result.isTerminal) lastRequest else null
         }
+        if (finished != null) recordRecent(event.result, finished)
+    }
+
+    /**
+     * A finished analysis becomes a recent entry. Only a run that produced a map
+     * counts: a cancelled or stale exploration must not push real work out of a
+     * capped list (`V0.3_SPEC.md` §5.2).
+     */
+    private fun recordRecent(result: FlowAnalysisResult, request: AnalysisRequest) {
+        if (result.status != FlowResultStatus.COMPLETED &&
+            result.status != FlowResultStatus.TRUNCATED
+        ) {
+            return
+        }
+        val symbol = result.rootFrame?.symbol ?: return
+        if (!request.file.isValid) return
+        FlowLensRecents.getInstance(project)
+            .record(FlowEntryRef.of(symbol, project, request.file), request.limits)
     }
 
     /** Internal for lifecycle tests: events from a non-current run must be dropped. */
