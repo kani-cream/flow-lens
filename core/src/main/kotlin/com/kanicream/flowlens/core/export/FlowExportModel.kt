@@ -46,7 +46,8 @@ data class ExportStrings(
     val nothing: String = "nothing",
     val notFollowed: String = "Not followed",
     val dispatchChoices: String = "Dispatch choices",
-    val controlFlowSimplified: String = "control flow simplified",
+    /** A pattern with `{0}` for how many bodies were simplified. */
+    val controlFlowSimplified: String = "control flow simplified in {0} of the bodies shown",
     val chosenByReader: String = "chosen by the reader",
     /**
      * Reason lines, as patterns with `{0}` for the count. The export says what

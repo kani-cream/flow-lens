@@ -115,11 +115,16 @@ class FlowModelBuilderTest {
     }
 
     @Test
-    fun `control flow incomplete flag is carried into snapshots`() {
+    fun `a simplified body is recorded on the frame and on the run`() {
+        // The run-wide flag follows from the frames rather than being set beside
+        // them, so a warning can always name a body to start from.
         val b = builder()
-        b.openRootFrame(symbol("root"), null)
+        val root = b.openRootFrame(symbol("root"), null)
         assertFalse(b.snapshot(FlowResultStatus.RUNNING).controlFlowIncomplete)
-        b.controlFlowIncomplete = true
-        assertTrue(b.snapshot(FlowResultStatus.RUNNING).controlFlowIncomplete)
+
+        b.markControlFlowSimplified(root)
+        val snapshot = b.snapshot(FlowResultStatus.RUNNING)
+        assertTrue(snapshot.controlFlowIncomplete)
+        assertTrue(snapshot.frames.getValue(root).controlFlowSimplified)
     }
 }

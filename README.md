@@ -57,7 +57,7 @@ Keyboard: `↑`/`↓` move, `→`/`←` expand and collapse, `Space` toggles,
 selection.
 
 Settings live under **Settings → Tools → Flow Lens**: max call depth (default 3),
-max semantic nodes (default 100), and whether traversal may enter test or
+max semantic nodes (default 250), and whether traversal may enter test or
 library sources (both off).
 
 ## Building

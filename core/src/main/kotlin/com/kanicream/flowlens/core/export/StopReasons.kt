@@ -29,7 +29,12 @@ internal object StopReasons {
             count(nodes) { it.kind == FlowNodeKind.CYCLE }
                 ?.let { add(format(s.reasonCycle, it)) }
             count(nodes) { it.kind == FlowNodeKind.LIMIT }?.let { add(s.truncated) }
-            if (request.result.controlFlowIncomplete) add(s.controlFlowSimplified)
+            // The status area names how many bodies; an export that only said
+            // "something was simplified" would describe the same run differently
+            // (`V0.4_RESULTS.md` defect 7).
+            request.result.frames.values.count { it.controlFlowSimplified }
+                .takeIf { it > 0 }
+                ?.let { add(format(s.controlFlowSimplified, it)) }
         }
     }
 

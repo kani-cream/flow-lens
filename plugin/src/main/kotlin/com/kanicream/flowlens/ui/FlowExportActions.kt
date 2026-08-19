@@ -63,7 +63,8 @@ object FlowExport {
             nothing = FlowLensBundle.message("branch.empty"),
             notFollowed = FlowLensBundle.message("export.not.followed"),
             dispatchChoices = FlowLensBundle.message("export.dispatch.choices"),
-            controlFlowSimplified = FlowLensBundle.message("status.control.flow.simplified"),
+            controlFlowSimplified =
+                FlowLensBundle.message("status.reason.control.flow.simplified", "{0}"),
             chosenByReader = FlowLensBundle.message("export.chosen.by.reader"),
             // The same words the canvas uses, so an export reads in the reader's
             // language rather than in enum names.

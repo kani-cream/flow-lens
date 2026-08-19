@@ -105,8 +105,27 @@ Anywhere a count could span calls *and* callbacks, do not name one of them.
 3. Read the Japanese where it lands, not in the properties file. Length and
    tone are properties of the card, not of the string.
 
+   Switch the sandbox itself: **Settings → Appearance → Language**, or accept the
+   language-pack notification the IDE offers. That is the real configuration a
+   Japanese user has, so it is the one worth reading the text in.
+
    Do **not** get there by passing `-Duser.language=ja` to `runIde`. That
    triggers the platform's language-plugin detection, which offers to install a
    language pack and then restarts the IDE — and a Gradle-launched sandbox
    cannot restart itself, so the run dies with exit code 2. The locale has to
    come from the machine, or from a language pack installed into the sandbox.
+
+4. **Reset the sandbox locale before a release build.** Choosing Japanese in the
+   sandbox persists `LocalizationStateService.selectedLocale` into
+   `.intellijPlatform/sandbox/.../config/options/ide.general.xml`, and
+   `buildSearchableOptions` — a headless IDE reading that same config — then
+   fails with `Locale must be default` on every later build.
+
+   `-Duser.language=en` on the task does not help: the persisted choice wins over
+   the JVM argument. Pointing the task at its own `sandboxConfigDirectory`, and
+   at the test sandbox, were both tried and neither took effect.
+
+   So it is a manual step: remove the `LocalizationStateService` component from
+   that file, or delete the sandbox directory, before running
+   `./gradlew build --rerun-tasks` or `buildPlugin`. CI is unaffected — it skips
+   the task — and so is an ordinary incremental build.

@@ -252,6 +252,36 @@ class V05AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
         assertNotNull(card.executionGlyph)
     }
 
+    // ---- the simplified-control-flow warning has to be findable ----
+
+    fun `test a simplified body is counted and leads to the call that owns it`() {
+        // Regression from the first real project: one `continue` in a nested
+        // loop set a banner over a hundred-node map that said only that
+        // something, somewhere, had been simplified.
+        val result = analyze(
+            "helper(() -> charge()); skip();",
+            members = """
+                void skip() {
+                    for (String s : items) { if (s.isEmpty()) { continue; } audit(); }
+                }
+            """.trimIndent(),
+        )
+        assertTrue("the fixture must actually simplify something", result.controlFlowIncomplete)
+
+        val simplified = result.frames.values.filter { it.controlFlowSimplified }
+        assertEquals("and only the body that has it", 1, simplified.size)
+        assertEquals("skip()", simplified.single().symbol.displayName)
+
+        val reason = FlowStatusModel.stateOf(null, result).stopReasons
+            .single { it.text == FlowLensBundle.message("status.reason.control.flow.simplified", 1) }
+        val owner = rootEvents(result).first { it.targetSymbol?.displayName == "skip()" }
+        assertEquals(
+            "a warning a reader cannot follow is a banner, not a disclosure",
+            owner.id,
+            reason.firstNode,
+        )
+    }
+
     // ---- T: v0.2 structures inside a callback body ----
 
     fun `test T a branch inside a body renders like a branch anywhere else`() {

@@ -72,6 +72,17 @@ class FlowModelBuilder(
     private var nextFrameId = 0
 
     var controlFlowIncomplete: Boolean = false
+        private set
+
+    /**
+     * Records that [frameId]'s body held control flow the analyzer did not
+     * represent. The run-wide flag follows from the frames rather than being set
+     * beside them, so the two cannot disagree.
+     */
+    fun markControlFlowSimplified(frameId: FrameId) {
+        frames.getValue(frameId).controlFlowSimplified = true
+        controlFlowIncomplete = true
+    }
 
     /** True once the node budget forced a LIMIT marker. */
     var wasTruncated: Boolean = false
@@ -407,8 +418,9 @@ class FlowModelBuilder(
     ) {
         val events = mutableListOf<FlowNode>()
         var bodyComplete = false
+        var controlFlowSimplified = false
 
         fun toImmutable(): FlowFrame =
-            FlowFrame(id, symbol, entryLocation, depth, events.toList(), bodyComplete)
+            FlowFrame(id, symbol, entryLocation, depth, events.toList(), bodyComplete, controlFlowSimplified)
     }
 }

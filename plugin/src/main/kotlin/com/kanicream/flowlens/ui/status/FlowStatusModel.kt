@@ -5,6 +5,7 @@ import com.kanicream.flowlens.core.model.ExecutionMode
 import com.kanicream.flowlens.core.model.FlowAnalysisResult
 import com.kanicream.flowlens.core.model.FlowNode
 import com.kanicream.flowlens.core.model.FlowNodeKind
+import com.kanicream.flowlens.core.model.FrameId
 import com.kanicream.flowlens.core.model.NodeId
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.service.FlowMetadata
@@ -138,7 +139,39 @@ object FlowStatusModel {
             reason("status.reason.callback.timing", nodes) {
                 it.kind == FlowNodeKind.CALLBACK && it.executionMode == ExecutionMode.UNKNOWN
             },
+            simplifiedControlFlowReason(result),
         )
+    }
+
+    /**
+     * Which bodies held control flow the analyzer did not represent, and one to
+     * start from.
+     *
+     * It used to be a banner with no count and no target: over a hundred-node
+     * map, "something somewhere was simplified" is honest and unusable. A single
+     * `continue` in a nested loop was what produced it on the first real
+     * project, and there was no way to find it.
+     */
+    private fun simplifiedControlFlowReason(result: FlowAnalysisResult): StopReason? {
+        val simplified = result.frames.values.filter { it.controlFlowSimplified }
+        if (simplified.isEmpty()) return null
+        val owners = ownerNodes(result)
+        return StopReason(
+            text = FlowLensBundle.message("status.reason.control.flow.simplified", simplified.size),
+            count = simplified.size,
+            // The root frame has no owning call, and then there is nothing to
+            // select — the reader is already looking at it.
+            firstNode = simplified.firstNotNullOfOrNull { owners[it.id] },
+        )
+    }
+
+    /** The call each frame hangs off, so a frame-level fact can name a card. */
+    private fun ownerNodes(result: FlowAnalysisResult): Map<FrameId, NodeId> = buildMap {
+        for (frame in result.frames.values) {
+            for (node in allNodes(frame.events)) {
+                node.targetFrameId?.let { put(it, node.id) }
+            }
+        }
     }
 
     private fun reason(
