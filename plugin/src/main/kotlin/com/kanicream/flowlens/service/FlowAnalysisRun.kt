@@ -183,7 +183,9 @@ internal class FlowAnalysisRun(
                         modelBuilder.markFrameComplete(task.frameId)
                     }
                     is FrameComputation.Computed -> {
-                        if (computation.controlFlowSimplified) modelBuilder.controlFlowIncomplete = true
+                        if (computation.controlFlowSimplified) {
+                            modelBuilder.markControlFlowSimplified(task.frameId)
+                        }
                         val complete = appendItems(modelBuilder, queue, task, computation.items)
                         // A structure left open by truncation still keeps what it
                         // collected before the budget ran out.
