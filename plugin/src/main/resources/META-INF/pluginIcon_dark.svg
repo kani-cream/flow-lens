@@ -1,0 +1,10 @@
+<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dark-theme variant. Identical geometry: the two themes differ by palette
+       alone, lighter strokes and warmer nodes, as in Repo Lens. -->
+  <circle cx="17.5" cy="17.5" r="10.5" fill="none" stroke="#7C93F5" stroke-width="3.2"/>
+  <line x1="25.4" y1="25.4" x2="34.2" y2="34.2" stroke="#7C93F5" stroke-width="3.6" stroke-linecap="round"/>
+  <line x1="17.5" y1="14.3" x2="17.5" y2="17.6" stroke="#7C93F5" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M17.5 20.8 L15.3 17.1 L19.7 17.1 Z" fill="#7C93F5"/>
+  <circle cx="17.5" cy="11.8" r="2.3" fill="#FBBF24"/>
+  <circle cx="17.5" cy="23.5" r="2.3" fill="#FBBF24"/>
+</svg>
