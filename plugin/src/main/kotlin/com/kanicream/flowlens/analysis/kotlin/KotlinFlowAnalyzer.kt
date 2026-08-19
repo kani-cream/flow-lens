@@ -45,6 +45,8 @@ import org.jetbrains.kotlin.psi.KtWhileExpression
 import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
 import org.jetbrains.kotlin.psi.KtSuperExpression
 import org.jetbrains.kotlin.psi.KtIfExpression
+import org.jetbrains.kotlin.psi.KtParameter
+import org.jetbrains.kotlin.psi.KtValueArgument
 import org.jetbrains.kotlin.psi.KtLambdaExpression
 import org.jetbrains.kotlin.psi.KtLoopExpression
 import org.jetbrains.kotlin.psi.KtNamedFunction
@@ -356,36 +358,73 @@ class KotlinFlowAnalyzer : FlowLanguageAnalyzer {
          * guess about an API's intent (`V0.5_SPEC.md` §4.1).
          */
         private fun addCallbacks(call: KtCallExpression, receiverName: String) {
-            val lambdas = call.valueArguments.mapNotNull {
-                it.getArgumentExpression() as? KtLambdaExpression
+            val lambdas = call.valueArguments.filter {
+                it.getArgumentExpression() is KtLambdaExpression
             }
             if (lambdas.isEmpty()) return
             val resolved = call.calleeExpression?.mainReference?.resolve() as? KtNamedFunction
-            val timing = KnownCallbackApis.kotlinTiming(resolved?.fqName?.asString())
-                ?: inlineTiming(resolved)
-                ?: CallbackTiming.UNDETERMINED
-            for (lambda in lambdas) {
+            val listed = KnownCallbackApis.kotlinTiming(resolved?.fqName?.asString())
+            lambdas.forEachIndexed { index, argument ->
+                // Resolved per lambda, not per call: `inline fun f(a: () -> Unit,
+                // noinline b: () -> Unit)` makes a promise about `a` that it does
+                // not make about `b`, and collapsing the two loses the half that
+                // could be justified.
+                val timing = listed
+                    ?: inlineTiming(resolved, parameterFor(resolved, call, argument))
+                    ?: CallbackTiming.UNDETERMINED
                 sink += ExtractedCallback(
-                    body = lambda,
+                    body = argument.getArgumentExpression() as KtLambdaExpression,
                     receiverShortName = receiverName,
                     executionMode = timing.executionMode,
                     orderingStatus = timing.orderingStatus,
                     conditional = conditionalDepth > 0,
+                    ordinal = index,
+                    siblingCount = lambdas.size,
                 )
             }
         }
 
-        /** An inline function's lambda cannot outlive the call, so it runs during it. */
-        private fun inlineTiming(function: KtNamedFunction?): CallbackTiming? {
-            if (function == null) return null
-            if (!function.hasModifier(KtTokens.INLINE_KEYWORD)) return null
-            // `noinline` removes exactly that guarantee for the parameter it is
-            // on, and telling which lambda maps to which parameter is more than
-            // this rule can promise — so any noinline makes the call undetermined.
-            val escapes = function.valueParameters.any {
-                it.hasModifier(KtTokens.NOINLINE_KEYWORD)
+        /**
+         * The parameter [argument] is bound to, or null when that cannot be told.
+         *
+         * A named argument names its parameter. A positional one is matched by
+         * index, and a trailing lambda by being last — which is only sound while
+         * every earlier argument is positional too, so a call mixing the two
+         * gives up rather than guessing.
+         */
+        private fun parameterFor(
+            function: KtNamedFunction?,
+            call: KtCallExpression,
+            argument: KtValueArgument,
+        ): KtParameter? {
+            val parameters = function?.valueParameters ?: return null
+            argument.getArgumentName()?.asName?.asString()?.let { named ->
+                return parameters.firstOrNull { it.name == named }
             }
-            return if (escapes) null else CallbackTiming.IN_PLACE
+            val arguments = call.valueArguments
+            if (arguments.any { it.getArgumentName() != null }) return null
+            return parameters.getOrNull(arguments.indexOf(argument))
+        }
+
+        /**
+         * Whether an inline function's parameter is one whose lambda cannot
+         * outlive the call.
+         *
+         * `inline` alone is not the guarantee. `noinline` opts the parameter out
+         * of inlining entirely, and `crossinline` keeps it inlined but allows it
+         * to be invoked from another execution context — a local object, a nested
+         * function, another thread — which is precisely the case where "runs in
+         * place" would be a false claim.
+         */
+        private fun inlineTiming(
+            function: KtNamedFunction?,
+            parameter: KtParameter?,
+        ): CallbackTiming? {
+            if (function == null || parameter == null) return null
+            if (!function.hasModifier(KtTokens.INLINE_KEYWORD)) return null
+            if (parameter.hasModifier(KtTokens.NOINLINE_KEYWORD)) return null
+            if (parameter.hasModifier(KtTokens.CROSSINLINE_KEYWORD)) return null
+            return CallbackTiming.IN_PLACE
         }
 
         private fun walkIf(element: KtIfExpression) {

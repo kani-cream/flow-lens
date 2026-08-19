@@ -74,6 +74,14 @@ class ExtractedCallback(
     val orderingStatus: OrderingStatus,
     /** True when the enclosing call itself may not execute. */
     val conditional: Boolean = false,
+    /**
+     * Which of the receiving call's bodies this is, and how many it received.
+     * Two bodies handed to one call have to be told apart, and their position in
+     * the argument list is the only thing that distinguishes them
+     * (`V0.5_SPEC.md` §5.2).
+     */
+    val ordinal: Int = 0,
+    val siblingCount: Int = 1,
 ) : FlowItem
 
 /**

@@ -51,19 +51,23 @@ object MarkdownExporter {
     ) {
         val pad = "  ".repeat(indent)
         for (node in events) {
-            out.append(pad).append("- ").append(describe(node, request)).append("\n")
+            // A body handed to a call is written under that call, not beside it.
+            // A sibling bullet would put it in the sequence, which is the one
+            // thing it is not (`V0.5_SPEC.md` §5.5).
+            val own = if (node.attachedTo != null) "$pad  " else pad
+            out.append(own).append("- ").append(describe(node, request)).append("\n")
 
             for (branch in node.branches) {
                 val label = listOfNotNull(
                     request.context.strings.branchKinds[branch.kind.name] ?: branch.kind.name.lowercase(),
                     branch.label,
                 ).joinToString(" ")
-                out.append(pad).append("  - **").append(label).append("**")
+                out.append(own).append("  - **").append(label).append("**")
                 if (branch.isEmpty) {
                     out.append(" — ").append(request.context.strings.nothing).append("\n")
                 } else {
                     out.append("\n")
-                    appendEvents(out, request, branch.events, indent + 2)
+                    appendEvents(out, request, branch.events, own.length / 2 + 2)
                 }
             }
 
@@ -71,7 +75,7 @@ object MarkdownExporter {
             // A collapsed frame is a view state, not part of the flow, so the
             // export carries it either way (`V0.4_SPEC.md` §5.3).
             if (body != null && body.events.isNotEmpty()) {
-                appendEvents(out, request, body.events, indent + 1)
+                appendEvents(out, request, body.events, own.length / 2 + 1)
             }
         }
     }

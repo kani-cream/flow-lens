@@ -27,6 +27,15 @@ data class FlowNode(
     val targetLocation: FlowLocation?,
     val targetFrameId: FrameId?,
     val depth: Int,
+    /**
+     * The call this body was handed to, when this event is a callback of one.
+     *
+     * A callback is attached to a call, not a link in the chain: what follows the
+     * call follows the *call*, however the callback is drawn (`V0.5_SPEC.md`
+     * §5.5). Renderers derive the connection from this rather than from adjacency,
+     * so the canvas and the exports cannot disagree about it.
+     */
+    val attachedTo: NodeId? = null,
     val resolutionStatus: ResolutionStatus?,
     val dispatchConfidence: DispatchConfidence?,
     val executionMode: ExecutionMode,
@@ -63,6 +72,9 @@ data class FlowNode(
             require(kind in FRAME_OWNING_KINDS) {
                 "only callable events may own a target frame, got $kind"
             }
+        }
+        if (attachedTo != null) {
+            require(kind == FlowNodeKind.CALLBACK) { "only a callback may attach to a call, got $kind" }
         }
         if (branches.isNotEmpty()) {
             require(kind in STRUCTURAL_KINDS) { "only a structural event may own branches, got $kind" }

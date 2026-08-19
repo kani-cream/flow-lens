@@ -111,22 +111,61 @@ class V05AcceptanceTest : LightJavaCodeInsightFixtureTestCase() {
         val result = analyze("executor.submit(() -> charge()); save();")
         val events = rootEvents(result)
         // save() sits after the callback in source order because the map has to
-        // draw it somewhere, but it is the step that follows submit().
+        // draw it somewhere, but it is the step that follows submit(). Asserting
+        // only the connector style left the question of what precedes save()
+        // unasked, and the answer was wrong.
+        assertEquals(
+            "the body is attached to the call it was handed to",
+            events[0].id,
+            events[1].attachedTo,
+        )
+        assertNull("save() is a link in the chain, not a body hung off one", events[2].attachedTo)
         assertEquals(OrderingStatus.DETERMINISTIC, events[2].orderingStatus)
         assertEquals(OrderingStatus.UNSPECIFIED, events[1].orderingStatus)
+
         val cards = CanvasViewModelBuilder.build(result, emptySet())!!.cards
         assertTrue("an asynchronous body must not claim to be the next step", cards[1].dashedIncomingConnector)
         assertFalse(cards[2].dashedIncomingConnector)
+        assertTrue("the body hangs off the call", cards[1].attached)
+        assertFalse(cards[2].attached)
+        assertTrue(
+            "an attached body is set in, which is what leaves the connector room to pass it",
+            cards[1].bounds.x > cards[0].bounds.x,
+        )
+        assertEquals(
+            "and what follows the call is back on the call's own column",
+            cards[0].bounds.x,
+            cards[2].bounds.x,
+        )
     }
 
-    fun `test J two bodies handed to one call become two frames, in argument order`() {
-        val result = analyze("java.util.Optional.of(1).map(x -> charge()).ifPresent(x -> audit());")
-        assertEquals(
-            listOf("{ } → map()", "{ } → ifPresent()"),
-            callbacks(result).map { it.targetSymbol!!.displayName },
+    fun `test J two bodies handed to ONE call become two frames, in argument order`() {
+        // The case is two lambdas in one call. Chaining two calls with one lambda
+        // each looked like it and tested nothing about telling them apart.
+        val result = analyze(
+            "pair(() -> charge(), () -> audit()); save();",
+            members = "void pair(Runnable first, Runnable second) { }",
         )
-        assertEquals(listOf("charge()"), bodyOf(result, callbacks(result)[0])?.let(::names))
-        assertEquals(listOf("audit()"), bodyOf(result, callbacks(result)[1])?.let(::names))
+        val callbacks = callbacks(result)
+        assertEquals(2, callbacks.size)
+        assertEquals(listOf("charge()"), bodyOf(result, callbacks[0])?.let(::names))
+        assertEquals(listOf("audit()"), bodyOf(result, callbacks[1])?.let(::names))
+
+        val names = callbacks.map { it.targetSymbol!!.displayName }
+        assertEquals(
+            "one name for two bodies leaves the reader unable to tell which is which",
+            names.size,
+            names.distinct().size,
+        )
+        val keys = callbacks.map { it.targetSymbol!!.key }
+        assertEquals("and identity is what pins and choices are keyed by", keys.size, keys.distinct().size)
+
+        val call = rootEvents(result).first { it.targetSymbol?.displayName == "pair()" }
+        assertEquals(listOf(call.id, call.id), callbacks.map { it.attachedTo })
+        assertNull(
+            "save() follows pair(), not either body",
+            rootEvents(result).first { it.targetSymbol?.displayName == "save()" }.attachedTo,
+        )
     }
 
     // ---- K, L, M: a callback body costs what any other body costs ----

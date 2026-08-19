@@ -47,6 +47,12 @@ class CardVM(
     val style: CardStyle,
     val depthLabel: String,
     val boundaryBeforeCard: Boolean,
+    /**
+     * This card is a body handed to the card above it, not the next step after
+     * it. It is indented, and the sequence connector runs from the owning call
+     * past it to whatever really follows (`V0.5_SPEC.md` §5.5).
+     */
+    val attached: Boolean,
     val dashedIncomingConnector: Boolean,
     val expandable: Boolean,
     val expanded: Boolean,
@@ -349,6 +355,7 @@ object CanvasViewModelBuilder {
             style = style,
             depthLabel = FlowLensBundle.message("card.depth.label", node.depth),
             boundaryBeforeCard = node.resolutionStatus == ResolutionStatus.EXTERNAL,
+            attached = node.attachedTo != null,
             // The ordinary connector claims "this runs next". That is untrue for a
             // conditional call (`V0.1_SPEC.md` §13) and equally untrue for a
             // goroutine, which may run at any time, or a deferred call, which runs
@@ -573,14 +580,20 @@ object CanvasViewModelBuilder {
                 index > 0 -> CanvasMetrics.CONNECTOR_GAP
                 else -> 0
             }
-            card.bounds = Rectangle(cardX, cursorY, contentWidth, CanvasMetrics.CARD_HEIGHT)
+            // An attached body is set in from the left, which both marks it as
+            // subordinate to the call above it and leaves the gutter the
+            // sequence connector uses to pass it by.
+            val indent = if (card.attached) CanvasMetrics.CHILD_INDENT else 0
+            val x = cardX + indent
+            val width = contentWidth - indent
+            card.bounds = Rectangle(x, cursorY, width, CanvasMetrics.CARD_HEIGHT)
             cursorY += CanvasMetrics.CARD_HEIGHT
 
             val body = card.childFrame
             if (card.sections.isNotEmpty()) {
-                cursorY = layoutSections(card, cardX, cursorY, contentWidth)
+                cursorY = layoutSections(card, x, cursorY, width)
                 card.containerBounds =
-                    Rectangle(cardX, card.bounds.y, contentWidth, cursorY - card.bounds.y)
+                    Rectangle(x, card.bounds.y, width, cursorY - card.bounds.y)
             } else if (body == null) {
                 card.containerBounds = Rectangle(card.bounds)
             } else {
@@ -588,14 +601,14 @@ object CanvasViewModelBuilder {
                 // the container was measured that much wider than its content.
                 val bodyRect = layoutFrame(
                     frame = body,
-                    x = cardX + CanvasMetrics.CHILD_INDENT,
+                    x = x + CanvasMetrics.CHILD_INDENT,
                     y = cursorY + CanvasMetrics.NESTED_TOP_GAP,
                     padding = 0,
                     withHeader = false,
                 )
                 cursorY = bodyRect.y + bodyRect.height + CanvasMetrics.NESTED_BOTTOM_PAD
                 card.containerBounds =
-                    Rectangle(cardX, card.bounds.y, contentWidth, cursorY - card.bounds.y)
+                    Rectangle(x, card.bounds.y, width, cursorY - card.bounds.y)
             }
             // A call that could not be entered because of the depth limit keeps an
             // explicit continuation marker: a connector never just stops.

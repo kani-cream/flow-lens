@@ -42,6 +42,8 @@ data class FlowEventSpec(
     val executionMode: ExecutionMode = ExecutionMode.SYNC,
     val orderingStatus: OrderingStatus = OrderingStatus.DETERMINISTIC,
     val metadata: Map<String, String> = emptyMap(),
+    /** The call this body was handed to; see [com.kanicream.flowlens.core.model.FlowNode.attachedTo]. */
+    val attachedTo: NodeId? = null,
     /**
      * Short source-derived text for display, used by terminators to say what a
      * `return` hands back. A call needs none: its target names it.
@@ -275,6 +277,7 @@ class FlowModelBuilder(
                 executionMode = spec.executionMode,
                 orderingStatus = spec.orderingStatus,
                 metadata = spec.metadata,
+                attachedTo = spec.attachedTo,
                 sourceSummary = spec.sourceSummary,
             ),
         )

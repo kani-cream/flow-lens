@@ -86,12 +86,71 @@ class JavaCallbackTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(OrderingStatus.UNSPECIFIED, callback.orderingStatus)
     }
 
-    fun `test J two lambdas in one call become two events, in argument order`() {
+    fun `test J two lambdas in ONE call become two events, in argument order`() {
         val items = itemsOf(
-            "java.util.Optional.of(1).map(x -> charge()).ifPresent(x -> audit());",
+            "pair(() -> charge(), () -> audit());",
+            fields = "void pair(Runnable first, Runnable second) { }",
         )
         val callbacks = items.filterIsInstance<ExtractedCallback>()
-        assertEquals(listOf("map", "ifPresent"), callbacks.map { it.receiverShortName })
+        assertEquals(listOf("pair", "pair"), callbacks.map { it.receiverShortName })
+        assertEquals(listOf(0, 1), callbacks.map { it.ordinal })
+        assertEquals(
+            "their position in the argument list is the only thing that separates them",
+            listOf(2, 2),
+            callbacks.map { it.siblingCount },
+        )
+    }
+
+    /**
+     * The documented list is the only reason Java can claim a timing, so what is
+     * *not* on it matters as much as what is (`V0.5_SPEC.md` §4.3).
+     */
+    fun `test a lazy stream operation does not run its lambda where it is written`() {
+        // Intermediate operations are lazy by contract: nothing runs until a
+        // terminal operation starts the pipeline, possibly in another statement,
+        // possibly never.
+        val items = itemsOf("items.stream().map(s -> charge()).count();")
+        val callback = items.filterIsInstance<ExtractedCallback>().single()
+        assertEquals(ExecutionMode.UNKNOWN, callback.executionMode)
+    }
+
+    fun `test a terminal stream operation does run it before returning`() {
+        val items = itemsOf("items.stream().forEach(s -> charge());")
+        assertEquals(
+            ExecutionMode.SYNC,
+            items.filterIsInstance<ExtractedCallback>().single().executionMode,
+        )
+    }
+
+    fun `test Executor execute may run on the calling thread, so it promises nothing`() {
+        // "may execute in a new thread, in a pooled thread, or in the calling
+        // thread, at the discretion of the Executor implementation."
+        val items = itemsOf(
+            "plain.execute(() -> charge());",
+            fields = "java.util.concurrent.Executor plain;",
+        )
+        assertEquals(
+            ExecutionMode.UNKNOWN,
+            items.filterIsInstance<ExtractedCallback>().single().executionMode,
+        )
+    }
+
+    fun `test constructing a Thread starts nothing`() {
+        val items = itemsOf("new Thread(() -> charge());")
+        assertEquals(
+            "the body runs if and when somebody calls start(), which is not here",
+            ExecutionMode.UNKNOWN,
+            items.filterIsInstance<ExtractedCallback>().single().executionMode,
+        )
+    }
+
+    fun `test an ExecutorService task is still asynchronous`() {
+        // The contract does say these are asynchronous tasks, so this one stays.
+        assertEquals(
+            ExecutionMode.ASYNC,
+            itemsOf("executor.submit(() -> charge());")
+                .filterIsInstance<ExtractedCallback>().single().executionMode,
+        )
     }
 
     fun `test N a lambda that is not passed to a call is not invented as a callback`() {
