@@ -10,6 +10,12 @@ enum class BranchKind {
     TRY,
     CATCH,
     FINALLY,
+
+    /**
+     * The members of a library group: one run of steps drawn as one card, not
+     * one alternative among several (`V1.0_GROUPING_SPEC.md` §4).
+     */
+    GROUP,
 }
 
 /**
@@ -34,7 +40,9 @@ data class FlowBranch(
      */
     val isConditional: Boolean
         get() = when (kind) {
-            BranchKind.TRY, BranchKind.FINALLY -> false
+            // A try body, a finally, and the members of a group all run. Only a
+            // section that is one alternative among several may be skipped.
+            BranchKind.TRY, BranchKind.FINALLY, BranchKind.GROUP -> false
             else -> true
         }
 }

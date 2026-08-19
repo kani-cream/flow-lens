@@ -37,6 +37,8 @@ data class ExportStrings(
     val goroutine: String = "goroutine",
     val deferred: String = "deferred",
     val async: String = "runs concurrently",
+    /** A library group's count, as a pattern with `{0}` (`V1.0_GROUPING_SPEC.md` §5.5). */
+    val groupCalls: String = "{0} calls, not followed",
     /** Said out loud, because an omission would read as "runs here". */
     val timingUnknown: String = "timing not determined",
     val chosen: String = "chosen",

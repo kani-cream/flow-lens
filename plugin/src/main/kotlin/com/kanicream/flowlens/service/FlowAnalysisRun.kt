@@ -261,10 +261,11 @@ internal class FlowAnalysisRun(
         // Extraction emits a call and then the bodies handed to it, so the last
         // call appended is the one a callback belongs to.
         var owner: NodeId? = null
-        for (item in items) {
+        for (item in grouped(items)) {
             val complete = when (item) {
                 is ComputedCall -> appendCall(builder, queue, task, item) { owner = it }
                 is ComputedCallback -> appendCallback(builder, queue, task, item, owner)
+                is ComputedGroup -> appendGroup(builder, task, item)
                 is ComputedTerminator -> appendTerminator(builder, task, item)
                 is ComputedStructure -> appendStructure(builder, queue, task, item)
             }
@@ -272,6 +273,61 @@ internal class FlowAnalysisRun(
         }
         return true
     }
+
+    /**
+     * Replaces each run of interchangeable library calls with a single group,
+     * leaving everything else in place and in order.
+     */
+    private fun grouped(items: List<ComputedItem>): List<ComputedItem> =
+        LibraryGrouping.collapse(
+            items = items,
+            keyOf = { (it as? ComputedCall)?.groupingKey },
+            group = { key, run ->
+                ComputedGroup(key.languageId, key.container, run.map { it as ComputedCall })
+            },
+            single = { it },
+        )
+
+    /**
+     * Appends one library group. Its members were already computed and resolved;
+     * what the group changes is that they cost one node between them
+     * (`V1.0_GROUPING_SPEC.md` §4.1).
+     */
+    private fun appendGroup(
+        builder: FlowModelBuilder,
+        task: PendingFrame,
+        group: ComputedGroup,
+    ): Boolean {
+        val members = group.members.map { it.spec }
+        val added = builder.addGroup(
+            task.frameId,
+            FlowEventSpec(
+                kind = FlowNodeKind.EXTERNAL_GROUP,
+                callSiteLocation = members.first().callSiteLocation,
+                targetSymbol = groupSymbol(group),
+                // The group is the boundary its members cross, so it carries the
+                // same status and the project-boundary marker still applies.
+                resolutionStatus = ResolutionStatus.EXTERNAL,
+                dispatchConfidence = null,
+                metadata = mapOf(FlowMetadata.GROUP_SIZE to members.size.toString()),
+            ),
+            members,
+        )
+        members.forEach(::countResolution)
+        nodesProduced = builder.nodeCount
+        if (added != null) return true
+        builder.addLimitEvent(task.frameId)
+        nodesProduced = builder.nodeCount
+        return false
+    }
+
+    /** A group is named by what its members have in common: the library. */
+    private fun groupSymbol(group: ComputedGroup): FlowSymbol = FlowSymbol(
+        languageId = group.languageId,
+        displayName = group.container,
+        containerName = null,
+        key = "${group.languageId}:group#${group.container}",
+    )
 
     /**
      * Appends a callback and queues its body, which costs a depth level and node
@@ -493,13 +549,28 @@ internal class FlowAnalysisRun(
         val cycleKey: String?,
         val childSymbol: FlowSymbol?,
         val childEntryLocation: FlowLocation?,
-    ) : ComputedItem
+    ) : ComputedItem {
+        /** Null unless this call may join a group (`V1.0_GROUPING_SPEC.md` §3). */
+        val groupingKey: LibraryGrouping.GroupingKey? = LibraryGrouping.keyOf(
+            resolution = spec.resolutionStatus,
+            entered = recursable && childEntryLocation != null,
+            languageId = spec.targetSymbol?.languageId,
+            container = spec.targetSymbol?.containerName,
+        )
+    }
 
     /**
      * A callable body handed to a call. It is not a call — nothing resolves, and
      * there is no dispatch to be confident or unsure about — but it owns a frame
      * and answers when it runs (`V0.5_SPEC.md` §3).
      */
+    /** A run of consecutive library calls that were not entered. */
+    private class ComputedGroup(
+        val languageId: String,
+        val container: String,
+        val members: List<ComputedCall>,
+    ) : ComputedItem
+
     private class ComputedCallback(
         val receiver: String?,
         val symbol: FlowSymbol,

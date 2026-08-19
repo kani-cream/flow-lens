@@ -202,6 +202,62 @@ class FlowModelBuilder(
         emit(structure.frameId, node)
     }
 
+    /**
+     * Adds a library group: one run of consecutive calls that were not entered,
+     * drawn as one card that carries them (`V1.0_GROUPING_SPEC.md` §4).
+     *
+     * **The group claims one node and its members claim none.** That is half the
+     * reason the rule exists: a route table of forty-seven unenterable calls
+     * used to exhaust the budget before the analysis reached anything the reader
+     * came for. The members are still produced, resolved and classified — what
+     * changes is what the budget is spent on.
+     *
+     * Returns null when only the reserved limit slot remains.
+     */
+    fun addGroup(frameId: FrameId, spec: FlowEventSpec, members: List<FlowEventSpec>): NodeId? {
+        require(spec.kind == FlowNodeKind.EXTERNAL_GROUP) { "a group must be an EXTERNAL_GROUP" }
+        require(members.size >= 2) { "a group of fewer than two members is just a call" }
+        if (!budget.tryClaimOrdinary()) return null
+        val depth = frames.getValue(frameId).depth
+        val id = NodeId(nextNodeId++)
+        val memberNodes = members.map { member ->
+            FlowNode(
+                id = NodeId(nextNodeId++),
+                kind = member.kind,
+                callSiteLocation = member.callSiteLocation,
+                targetSymbol = member.targetSymbol,
+                targetLocation = member.targetLocation,
+                targetFrameId = null,
+                depth = depth,
+                resolutionStatus = member.resolutionStatus,
+                dispatchConfidence = member.dispatchConfidence,
+                executionMode = member.executionMode,
+                orderingStatus = member.orderingStatus,
+                metadata = member.metadata,
+                sourceSummary = member.sourceSummary,
+            )
+        }
+        emit(
+            frameId,
+            FlowNode(
+                id = id,
+                kind = spec.kind,
+                callSiteLocation = spec.callSiteLocation,
+                targetSymbol = spec.targetSymbol,
+                targetLocation = null,
+                targetFrameId = null,
+                depth = depth,
+                resolutionStatus = spec.resolutionStatus,
+                dispatchConfidence = null,
+                executionMode = spec.executionMode,
+                orderingStatus = spec.orderingStatus,
+                metadata = spec.metadata,
+                branches = listOf(FlowBranch(BranchKind.GROUP, null, memberNodes)),
+            ),
+        )
+        return id
+    }
+
     /** Adds the single LIMIT marker into [frameId] using the reserved budget slot. */
     fun addLimitEvent(frameId: FrameId, location: FlowLocation? = null): NodeId? {
         if (!budget.tryClaimLimitSlot()) return null

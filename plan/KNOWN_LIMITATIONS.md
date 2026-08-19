@@ -586,7 +586,40 @@ spec now says deferred. A candidate for v1.x.
 
 ---
 
-## 47. Maintenance rule
+## 47. A library group is bounded by adjacency (v1.0)
+
+A group collapses a run of consecutive calls. The same library called in three
+places separated by the reader's own code makes three groups, not one — because
+the map is a sequence, and merging them would move calls in time.
+
+The threshold is three. Two cards are not yet noise, and a group of two costs a
+concept to save a line. That is a judgement, not a measurement.
+
+---
+
+## 48. A container name is not a library (v1.0)
+
+Grouping is by container — the Go package, the Java or Kotlin declaring type.
+Two classes from one dependency group separately, and so do two packages of one
+Go module. The name on the card is what the reader recognizes rather than what a
+build file calls the artifact.
+
+---
+
+## 49. Grouping hides repetition, not calls (v1.0)
+
+Every member of a group is in the model, in the Markdown export, and one click
+away on the canvas, and the count is the first thing on the card. What a reader
+no longer sees at a glance is *which* of the forty-seven was `GET` and which was
+`POST` — that costs one click.
+
+The Mermaid export is the one place the members are not written out at all. A
+diagram with the members restored would be the diagram the rule exists to
+prevent; the count stands in for them there.
+
+---
+
+## 50. Maintenance rule
 
 Whenever dogfooding, fixture testing, Plugin Verifier, or a user report reveals a surprising but currently accepted behavior:
 

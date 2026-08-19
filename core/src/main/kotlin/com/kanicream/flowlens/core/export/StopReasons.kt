@@ -23,7 +23,8 @@ internal object StopReasons {
             }?.let { add(format(s.reasonDepthLimited, it)) }
             count(nodes) { it.resolutionStatus == ResolutionStatus.UNRESOLVED }
                 ?.let { add(format(s.reasonUnresolved, it)) }
-            count(nodes) { it.resolutionStatus == ResolutionStatus.EXTERNAL }
+            // A group stands for its members and is not a call of its own (§5.4).
+            count(nodes) { it.resolutionStatus == ResolutionStatus.EXTERNAL && !it.isGroup }
                 ?.let { add(format(s.reasonExternal, it)) }
             count(nodes) { it.kind == FlowNodeKind.CYCLE }
                 ?.let { add(format(s.reasonCycle, it)) }

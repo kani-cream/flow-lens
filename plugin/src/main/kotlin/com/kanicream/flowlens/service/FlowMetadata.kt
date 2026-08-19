@@ -6,6 +6,9 @@ object FlowMetadata {
     const val LIMIT = "flowlens.limit"
     const val LIMIT_DEPTH = "depth"
 
+    /** How many calls a library group stands for (`V1.0_GROUPING_SPEC.md` §5). */
+    const val GROUP_SIZE = "flowlens.groupSize"
+
     /** Source origin of the resolved target declaration (SourceOrigin name). */
     const val ORIGIN = "flowlens.origin"
 
