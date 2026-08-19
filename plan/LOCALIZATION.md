@@ -102,6 +102,11 @@ Anywhere a count could span calls *and* callbacks, do not name one of them.
    which is the point.
 2. Check this glossary before inventing a word. If the concept is not here and
    is not obvious, add a row rather than deciding twice.
-3. Read the Japanese where it lands, not in the properties file:
-   `./gradlew runIde -Pflowlens.locale=ja`. Length and tone are properties of
-   the card, not of the string.
+3. Read the Japanese where it lands, not in the properties file. Length and
+   tone are properties of the card, not of the string.
+
+   Do **not** get there by passing `-Duser.language=ja` to `runIde`. That
+   triggers the platform's language-plugin detection, which offers to install a
+   language pack and then restarts the IDE — and a Gradle-launched sandbox
+   cannot restart itself, so the run dies with exit code 2. The locale has to
+   come from the machine, or from a language pack installed into the sandbox.

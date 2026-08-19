@@ -55,18 +55,12 @@ tasks.named<RunIdeTask>("runIde") {
     // section 16); restart the sandbox to pick up rebuilt jars.
     systemProperty("idea.auto.reload.plugins", "false")
 
-    // -Pflowlens.locale=ja runs the sandbox with the Japanese bundle resolved,
-    // so the Japanese text can be read where it is actually used rather than in
-    // a properties file. DynamicBundle picks the locale up from the JVM default.
-    // The IDE's own chrome stays English without a language pack, which is fine:
-    // what is under review here is Flow Lens's own text.
-    providers.gradleProperty("flowlens.locale").orNull?.let { locale ->
-        jvmArgumentProviders.add(
-            CommandLineArgumentProvider {
-                listOf("-Duser.language=$locale", "-Duser.country=${locale.uppercase()}")
-            },
-        )
-    }
+    // No locale override here, deliberately. Forcing -Duser.language triggers
+    // the platform's language-plugin detection, which offers to install a
+    // language pack and then restarts the IDE — and a Gradle-launched sandbox
+    // cannot restart itself, so the run dies with exit code 2. The locale the
+    // sandbox needs comes from the machine or from a language pack installed
+    // into the sandbox, never from a JVM argument.
 }
 
 tasks.buildSearchableOptions {
