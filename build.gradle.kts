@@ -10,8 +10,9 @@ plugins {
 
 allprojects {
     group = "com.kanicream.flowlens"
-    // v0.1: multi-language method flow + Flow Canvas (see plan/V0.1_SPEC.md).
-    version = "0.5.0"
+    // v1.0: the feature set is settled; what is left is making it safe to rely
+    // on daily (plan/PLAN.md section 17).
+    version = "1.0.0"
 }
 
 subprojects {

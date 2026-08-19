@@ -54,6 +54,19 @@ tasks.named<RunIdeTask>("runIde") {
     // Flow Lens does not claim dynamic unload safety (IMPLEMENTATION_GUARDRAILS.md
     // section 16); restart the sandbox to pick up rebuilt jars.
     systemProperty("idea.auto.reload.plugins", "false")
+
+    // -Pflowlens.locale=ja runs the sandbox with the Japanese bundle resolved,
+    // so the Japanese text can be read where it is actually used rather than in
+    // a properties file. DynamicBundle picks the locale up from the JVM default.
+    // The IDE's own chrome stays English without a language pack, which is fine:
+    // what is under review here is Flow Lens's own text.
+    providers.gradleProperty("flowlens.locale").orNull?.let { locale ->
+        jvmArgumentProviders.add(
+            CommandLineArgumentProvider {
+                listOf("-Duser.language=$locale", "-Duser.country=${locale.uppercase()}")
+            },
+        )
+    }
 }
 
 tasks.buildSearchableOptions {
