@@ -103,7 +103,10 @@ object MermaidExporter {
 
                 // An attached body is not where the sequence continues from.
                 if (owner != null) continue
-                frontier = if (node.branches.isEmpty()) {
+                // A group is one step. Drawing its members would put back the
+                // forty-seven boxes the group exists to replace; the count in
+                // the label is what discloses them (`V1.0_GROUPING_SPEC.md` §5.5).
+                frontier = if (node.branches.isEmpty() || node.isGroup) {
                     setOf(id)
                 } else {
                     branchEnds(node, id)
@@ -169,6 +172,9 @@ object MermaidExporter {
         val s = request.context.strings
         val name = node.targetSymbol?.displayName ?: MarkdownExporter.kindName(node, request)
         val notes = buildList {
+            node.metadata[MarkdownExporter.GROUP_SIZE_KEY]?.let {
+                add(s.groupCalls.replace("{0}", it))
+            }
             if (node.dispatchConfidence == DispatchConfidence.AMBIGUOUS) add(s.ambiguous)
             if (node.dispatchConfidence == DispatchConfidence.DECLARED_TARGET) add(s.declaredTarget)
             when (node.resolutionStatus) {

@@ -57,6 +57,14 @@ object MarkdownExporter {
             val own = if (node.attachedTo != null) "$pad  " else pad
             out.append(own).append("- ").append(describe(node, request)).append("\n")
 
+            if (node.isGroup) {
+                // The members are what the group stands for, not a labelled
+                // alternative, so they are written straight underneath it.
+                node.branches.firstOrNull()?.let {
+                    appendEvents(out, request, it.events, own.length / 2 + 1)
+                }
+                continue
+            }
             for (branch in node.branches) {
                 val label = listOfNotNull(
                     request.context.strings.branchKinds[branch.kind.name] ?: branch.kind.name.lowercase(),
@@ -105,6 +113,7 @@ object MarkdownExporter {
                 ExecutionMode.UNKNOWN -> add(s.timingUnknown)
                 else -> Unit
             }
+            node.metadata[GROUP_SIZE_KEY]?.let { add(s.groupCalls.replace("{0}", it)) }
             if (node.kind == FlowNodeKind.CYCLE) add(s.cycle)
             if (node.kind == FlowNodeKind.LIMIT) add(s.truncated)
             node.metadata[CHOSEN_KEY]?.let { add("${s.chosen}: `$it`") }
@@ -141,4 +150,5 @@ object MarkdownExporter {
     internal const val LIMIT_KEY = "flowlens.limit"
     internal const val LIMIT_DEPTH = "depth"
     internal const val TEST_SOURCE_KEY = "flowlens.testSource"
+    internal const val GROUP_SIZE_KEY = "flowlens.groupSize"
 }

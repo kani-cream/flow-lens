@@ -19,6 +19,17 @@ enum class FlowNodeKind {
      * execution mode and ordering that say when it runs (`V0.5_SPEC.md` §3).
      */
     CALLBACK,
+
+    /**
+     * A run of consecutive library calls that were not entered, drawn as one
+     * card carrying its count and its members (`V1.0_GROUPING_SPEC.md` §4).
+     *
+     * Repetition is what makes a map unreadable, not the library: forty-seven
+     * `RouterGroup.GET()` cards say nothing the first one did not, while ten
+     * different library calls in a row each say something. So a group collapses
+     * a run, and a single call is never one.
+     */
+    EXTERNAL_GROUP,
     CYCLE,
     LIMIT,
     STATUS,

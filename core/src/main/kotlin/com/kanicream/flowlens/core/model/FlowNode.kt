@@ -15,6 +15,9 @@ private val STRUCTURAL_KINDS = setOf(
     FlowNodeKind.TRY,
 )
 
+/** Events that own sections. A group owns members; a structure owns alternatives. */
+private val SECTION_OWNING_KINDS = STRUCTURAL_KINDS + FlowNodeKind.EXTERNAL_GROUP
+
 /**
  * One semantic event at one call site. Call-site identity, not target identity:
  * two calls to the same target are two nodes.
@@ -54,8 +57,15 @@ data class FlowNode(
      */
     val sourceSummary: String? = null,
 ) {
-    /** True when this event owns branches rather than being a single step. */
-    val isStructure: Boolean get() = branches.isNotEmpty()
+    /**
+     * True when this event owns *alternatives* — a condition, a switch, a loop,
+     * a try. A group also owns sections, but its members are one run of steps
+     * and not a choice between them, so it is deliberately not a structure.
+     */
+    val isStructure: Boolean get() = kind in STRUCTURAL_KINDS && branches.isNotEmpty()
+
+    /** True when this event stands for a run of library calls that were not entered. */
+    val isGroup: Boolean get() = kind == FlowNodeKind.EXTERNAL_GROUP
 
     /**
      * Default navigation destination (V0.1_SPEC.md section 18): the resolved target
@@ -77,7 +87,9 @@ data class FlowNode(
             require(kind == FlowNodeKind.CALLBACK) { "only a callback may attach to a call, got $kind" }
         }
         if (branches.isNotEmpty()) {
-            require(kind in STRUCTURAL_KINDS) { "only a structural event may own branches, got $kind" }
+            require(kind in SECTION_OWNING_KINDS) {
+                "only a structural event or a group may own branches, got $kind"
+            }
         }
     }
 }

@@ -126,7 +126,10 @@ object FlowStatusModel {
                 it.resolutionStatus == ResolutionStatus.UNRESOLVED
             },
             reason("status.reason.external", nodes) {
-                it.resolutionStatus == ResolutionStatus.EXTERNAL
+                // A group stands for its members and is not a call of its own.
+                // Counting both would say a run of three left the project four
+                // times (`V1.0_GROUPING_SPEC.md` §5.4).
+                it.resolutionStatus == ResolutionStatus.EXTERNAL && !it.isGroup
             },
             reason("status.reason.cycle", nodes) { it.kind == FlowNodeKind.CYCLE },
             reason("status.reason.truncated", nodes) { it.kind == FlowNodeKind.LIMIT },

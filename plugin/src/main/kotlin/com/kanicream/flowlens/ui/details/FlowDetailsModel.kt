@@ -84,6 +84,9 @@ object FlowDetailsModel {
                 },
             ),
         )
+        node.metadata[FlowMetadata.GROUP_SIZE]?.let {
+            add(row("details.group.size", it))
+        }
         node.metadata[FlowMetadata.CHOSEN]?.let {
             // Whose body is under this call, and that a reader chose it rather
             // than the analyzer proving it (`V0.4_SPEC.md` §4.5).

@@ -325,9 +325,15 @@ object CanvasViewModelBuilder {
     ): CardVM {
         val style = styleOf(node)
         val childFrame = node.targetFrameId?.let(result::frame)
-        val expandable = childFrame != null && childFrame.events.isNotEmpty()
+        // A group holds its members in a section rather than a frame, and opens
+        // the same way a body does: collapsed until asked (`V1.0_GROUPING_SPEC.md` §5.2).
+        val groupMembers = node.branches.firstOrNull()?.events.orEmpty().takeIf { node.isGroup }
+        val expandable = (childFrame != null && childFrame.events.isNotEmpty()) ||
+            !groupMembers.isNullOrEmpty()
         val expanded = expandable && node.id in expandedNodes
-        val sections = node.branches.map { branch ->
+        val sections = node.branches
+            .filter { !node.isGroup || expanded }
+            .map { branch ->
             SectionVM(
                 title = sectionTitleOf(branch),
                 cards = branch.events.map { event ->
@@ -386,7 +392,7 @@ object CanvasViewModelBuilder {
             // progress (REPO_LENS_LESSONS.md 3.6).
             resolving = childFrame != null && !childFrame.bodyComplete && !result.isTerminal,
             depthLimited = node.metadata[FlowMetadata.LIMIT] == FlowMetadata.LIMIT_DEPTH,
-            callsInside = childFrame?.events?.size ?: 0,
+            callsInside = groupMembers?.size ?: childFrame?.events?.size ?: 0,
             childFrame = childVM,
             sections = sections,
         )
@@ -428,6 +434,13 @@ object CanvasViewModelBuilder {
             node.sourceSummary?.let { "$kind $it" } ?: kind
         }
         FlowNodeKind.LIMIT -> FlowLensBundle.message("card.limit.node")
+        // The count is the first thing on the card, because it is the piece a
+        // collapsed run would otherwise have hidden (`V1.0_GROUPING_SPEC.md` §6).
+        FlowNodeKind.EXTERNAL_GROUP -> FlowLensBundle.message(
+            "card.group.label",
+            node.targetSymbol?.displayName ?: "?",
+            node.metadata[FlowMetadata.GROUP_SIZE] ?: node.branches.firstOrNull()?.events?.size ?: 0,
+        )
         FlowNodeKind.CYCLE -> FlowLensBundle.message(
             "card.cycle.label", node.targetSymbol?.displayName ?: "?",
         )

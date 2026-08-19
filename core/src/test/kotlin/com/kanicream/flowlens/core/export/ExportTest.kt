@@ -182,6 +182,72 @@ class ExportTest {
         assertTrue(MermaidExporter.export(request).contains("timing not determined"))
     }
 
+    /** `run() { gin×3 ; mine() }`, with the run collapsed into a group. */
+    private fun groupedFlow(): FlowAnalysisResult {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        val members = (1..3).map {
+            call("register$it", "gin", ResolutionStatus.EXTERNAL)
+        }
+        b.addGroup(
+            root,
+            FlowEventSpec(
+                kind = FlowNodeKind.EXTERNAL_GROUP,
+                callSiteLocation = location(1),
+                targetSymbol = FlowSymbol("go", "gin", null, "go:group#gin"),
+                resolutionStatus = ResolutionStatus.EXTERNAL,
+                dispatchConfidence = null,
+                metadata = mapOf(MarkdownExporter.GROUP_SIZE_KEY to "3"),
+            ),
+            members,
+        )
+        b.addEvent(root, call("mine"))
+        return b.snapshot(FlowResultStatus.COMPLETED)
+    }
+
+    @Test
+    fun `K Markdown carries the group, its count, and its members`() {
+        val markdown = MarkdownExporter.export(request(groupedFlow()))
+        assertTrue(markdown.contains("3 calls, not followed"), markdown)
+        assertTrue(markdown.contains("register1()"), "the members are still there\n$markdown")
+        assertTrue(markdown.contains("register3()"), markdown)
+
+        val group = markdown.lines().first { it.contains("3 calls") }
+        val member = markdown.lines().first { it.contains("register1()") }
+        assertTrue(
+            member.takeWhile { it == ' ' }.length > group.takeWhile { it == ' ' }.length,
+            "members are written under the group, not beside it\n$markdown",
+        )
+    }
+
+    @Test
+    fun `L Mermaid draws a group as one node and passes the sequence through it`() {
+        val mermaid = MermaidExporter.export(request(groupedFlow()))
+        assertFalse(
+            mermaid.contains("register1()"),
+            "drawing the members would put back the boxes the group replaces\n$mermaid",
+        )
+        assertTrue(mermaid.contains("3 calls, not followed"), mermaid)
+
+        val id = Regex("""\s*(n\d+)\["([^"]+)"]""").findAll(mermaid)
+            .associate { it.groupValues[2] to it.groupValues[1] }
+        val group = id.entries.first { it.key.startsWith("gin") }.value
+        val mine = id.entries.first { it.key.startsWith("mine()") }.value
+        assertTrue(
+            mermaid.lines().any { it.trimStart().startsWith(group) && it.endsWith(mine) },
+            "what follows the run follows the group\n$mermaid",
+        )
+    }
+
+    @Test
+    fun `the not-followed count counts members rather than the group`() {
+        val markdown = MarkdownExporter.export(request(groupedFlow()))
+        assertTrue(
+            markdown.contains("Outside the project: 3"),
+            "a run of three left the project three times, not four\n$markdown",
+        )
+    }
+
     @Test
     fun `L exporting twice produces identical text`() {
         val request = request()
