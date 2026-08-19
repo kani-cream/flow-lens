@@ -8,6 +8,17 @@ A limitation should be documented when it is accepted, not discovered by users a
 
 The initial entries below are v0.1 design boundaries already implied by the planning documents.
 
+### Reading a document that spans six milestones
+
+Entries are numbered in the order they were accepted and are never renumbered,
+because other documents cite them. Several early ones described a boundary that
+a later milestone removed. Those keep their original text and carry a dated
+note — **Delivered in vX** or **Superseded in vX** — so the record of what was
+once true stays readable while the current answer is unambiguous.
+
+An entry with no such note is current. Reviewed as a set at v1.0, which is when
+five entries turned out to be describing a product two or three milestones old.
+
 ---
 
 ## 2. Static analysis is not runtime tracing
@@ -32,11 +43,12 @@ The UI must expose uncertainty through dispatch/order/execution states instead o
 
 ---
 
-## 3. v0.1 primarily follows explicit calls
+## 3. Flow Lens primarily follows explicit calls
 
-v0.1 does not promise complete compiler-desugared/implicit call reconstruction.
+Complete compiler-desugared or implicit call reconstruction is not promised, and
+still is not at v1.0.
 
-Examples intentionally outside default v0.1 semantics unless explicitly implemented and tested:
+Examples intentionally outside the semantics unless explicitly implemented and tested:
 
 - Kotlin property getter/setter calls implied by syntax;
 - delegated properties;
@@ -52,7 +64,8 @@ Examples intentionally outside default v0.1 semantics unless explicitly implemen
 
 JetBrains PSI/UAST can expose compiler-generated/light declarations that look callable.
 
-v0.1 normally does not recurse into targets classified as synthetic/generated rather than physical authored project source.
+Flow Lens does not recurse into targets classified as synthetic or generated
+rather than physically authored project source.
 
 This may omit some executable implementation detail, but it prevents phantom flows such as generated Kotlin data-class members from being presented as authored code.
 
@@ -68,6 +81,12 @@ v0.1 may discover calls inside conditions/loops but must mark the frame/result a
 
 Short-circuit/conditional language constructs must be treated conservatively when full path semantics are unavailable.
 
+**Delivered in v0.2.** Conditions, switches, loops and try blocks are drawn as
+containers with labelled branches, and the sequence resumes after them. What
+survives of this entry is the last sentence: the constructs listed in §26 are
+still treated conservatively and still raise the disclosure. Read §20 and §26
+for what the branch model does and does not cover.
+
 ---
 
 ## 6. Polymorphic dispatch is conservative
@@ -80,7 +99,10 @@ Flow Lens distinguishes:
 
 v0.1 stops at genuinely ambiguous calls rather than selecting one implementation for visual convenience.
 
-Candidate enumeration/selection is planned for a later milestone.
+**Delivered in v0.4.** An ambiguous call lists the implementations the project
+contains and follows the one the reader chooses. The first sentence still holds
+and is the point of §35: choosing is not proving, so the call keeps reporting
+the dispatch confidence resolution actually gave it.
 
 ---
 
@@ -88,7 +110,7 @@ Candidate enumeration/selection is planned for a later milestone.
 
 Dependency, JDK/runtime, SDK, and other non-project targets are terminal by default.
 
-The IDE may still navigate to external source where available, but Flow Lens does not recursively expand library bodies in the default v0.1 analysis.
+The IDE may still navigate to external source where available, but Flow Lens does not recursively expand library bodies in the default analysis.
 
 ---
 
@@ -96,7 +118,7 @@ The IDE may still navigate to external source where available, but Flow Lens doe
 
 Production-code analysis does not automatically follow calls into test-only source unless the user enables test inclusion.
 
-A user may still explicitly start an analysis from a supported test method/function according to v0.1 rules.
+A user may still explicitly start an analysis from a supported test method or function.
 
 ---
 
@@ -111,13 +133,24 @@ v0.1 does not promise a complete goroutine scheduler model, channel communicatio
 
 The minimal visual treatment must still avoid presenting known goroutine/deferred calls as ordinary synchronous continuations.
 
+**Partly superseded in v0.5.** A goroutine's and a deferred closure's *body* are
+now visible, each with its timing stated (§43). Everything else in this entry
+stands: there is no scheduler model, no channel graph, and no defer-stack
+ordering.
+
 ---
 
 ## 10. Java/Kotlin async frameworks are not fully modeled in v0.1
 
 Executors, CompletableFuture chains, callbacks, Kotlin coroutines, reactive streams, and framework async dispatch are not guaranteed to receive first-class async-flow semantics in v0.1.
 
-If the analyzer does not know the asynchronous boundary confidently, it must not invent one.
+**Partly superseded in v0.5.** A body handed to a call is now a callback event
+that states when it runs, justified by Kotlin's `inline` rule, Go's keywords, or
+a documented API list that includes executors and `CompletableFuture` (§39).
+
+The second sentence is the half that did not change, and it is now the rule the
+implementation is built on: where nothing justifies an answer the timing is
+`UNKNOWN` and says so, rather than being guessed (§40).
 
 ---
 
@@ -140,7 +173,8 @@ still not followed (§42), and a lambda is still not an entry point of its own.
 Default bounds:
 
 - max callable depth: 3;
-- max persistent semantic nodes: 100.
+- max persistent semantic nodes: 250 (100 through v0.5; raised on measurement in
+  v1.0, see `PLAN.md` §11).
 
 A truncated analysis shows an explicit limit marker. More code may exist beyond that marker.
 
@@ -174,9 +208,12 @@ Missing Go capability is a normal degraded state; Java/Kotlin functionality shou
 
 ---
 
-## 16. Other JetBrains IDEs are not v0.1 compatibility targets
+## 16. Other JetBrains IDEs are not compatibility targets
 
-v0.1’s supported host is IntelliJ IDEA Ultimate.
+The supported host is IntelliJ IDEA Ultimate, and still is at v1.0. Flow Lens
+depends on the Java module, so it installs anywhere that has one — but Ultimate
+is the only host it is developed and verified against, which is what the
+Marketplace description says.
 
 GoLand, Android Studio, JetBrains Client/remote-only configurations, and other IDE products may work partially but are not release-contract targets until explicitly added and verified.
 
@@ -184,9 +221,11 @@ GoLand, Android Studio, JetBrains Client/remote-only configurations, and other I
 
 ## 17. Durable Flow Pin identity will be best-effort
 
-Flow Pins/Saved Flows are planned for later milestones.
+**Delivered in v0.3.** Identity is a symbol key rather than an offset, and a
+stored entry that cannot be resolved is refused rather than guessed at (§29).
 
-When implemented, durable identity must not depend only on line number/source offset. Refactors can still make symbol recovery ambiguous, especially across language/plugin changes.
+Refactors can still make symbol recovery ambiguous, especially across
+language/plugin changes.
 
 The product should surface a missing/moved pin honestly rather than silently navigating to a guessed symbol.
 
@@ -194,7 +233,14 @@ The product should surface a missing/moved pin honestly rather than silently nav
 
 ## 18. Dynamic plugin unload/update is not promised
 
-v0.1 does not promise that Flow Lens can be disabled/updated without restarting the IDE.
+Flow Lens does not promise that it can be disabled or updated without
+restarting the IDE, and that is unchanged at v1.0.
+
+Observed rather than theoretical: rebuilding the plugin under a running sandbox
+made the IDE read a jar mid-write and fail to load a settings class with
+`ZipException: invalid code lengths set`. The IDE normally prompts for a restart
+when a plugin's jars change, so a user meets this only if something replaces
+them underneath a running instance.
 
 Any future dynamic-unload claim requires real lifecycle testing, not only a verifier heuristic.
 
@@ -215,9 +261,13 @@ short-circuit right operand, or a Go case clause is discovered and marked as
 conditional. The renderer then avoids the ordinary certain connector for it and
 the result stays `controlFlowIncomplete`.
 
-This is deliberately weaker than a branch model: Flow Lens does not yet show
-which branch a call belongs to, does not merge branches, and does not evaluate
-conditions. Branch structure is v0.2.
+**Superseded in v0.2** for the constructs §26 lists as represented: a call now
+sits inside the branch it belongs to, branches reconverge, and the disclosure is
+raised only by what is genuinely not drawn. Conditions are still never
+evaluated — which branch runs is a runtime question.
+
+The original text is kept because the conditional *marker* it describes is still
+what §26's short-circuit and elvis cases fall back on.
 
 Headers that always execute — the `if` condition, loop and `for`/`range`
 clauses, a `switch` subject, the left operand of `&&`/`||`, `try` and `finally`
