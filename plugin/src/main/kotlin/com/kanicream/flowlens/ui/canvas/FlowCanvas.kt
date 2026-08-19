@@ -389,7 +389,9 @@ class FlowCanvas : JComponent() {
             intArrayOf(yEnd - 6, yEnd - 6, yEnd - 1),
             3,
         )
-        if (card.boundaryBeforeCard) paintBoundaryMarker(g2, x, (bodyTop + yEnd) / 2)
+        if (card.boundaryBeforeCard) {
+            paintBoundaryMarker(g2, x, CanvasMetrics.boundaryMarkerY(card.bounds.y))
+        }
     }
 
     /**
@@ -475,7 +477,9 @@ class FlowCanvas : JComponent() {
             intArrayOf(yEnd - 6, yEnd - 6, yEnd - 1),
             3,
         )
-        if (to.boundaryBeforeCard) paintBoundaryMarker(g2, x, (fromBottom + yEnd) / 2)
+        if (to.boundaryBeforeCard) {
+            paintBoundaryMarker(g2, x, CanvasMetrics.boundaryMarkerY(to.bounds.y))
+        }
     }
 
     /** Local project-boundary crossing (VISUAL_DESIGN.md section 11). */

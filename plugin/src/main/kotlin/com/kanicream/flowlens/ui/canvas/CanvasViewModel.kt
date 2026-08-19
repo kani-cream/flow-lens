@@ -183,6 +183,17 @@ object CanvasMetrics {
     const val EXPANDER_WIDTH = 46
     const val DEPTH_WIDTH = 34
     const val BOUNDARY_GAP = 40
+
+    /**
+     * Where the boundary marker sits: inside the gap reserved above the card it
+     * belongs to, rather than at the midpoint of the connector.
+     *
+     * The two are the same for an ordinary connector, and only the gap is empty
+     * when the connector is a long one detouring around an attached body — the
+     * midpoint of that line falls beside the body, and the label landed on top
+     * of it.
+     */
+    fun boundaryMarkerY(cardTop: Int): Int = cardTop - BOUNDARY_GAP / 2
     const val FRAME_PADDING = 14
     const val FRAME_HEADER = 34
     const val CHILD_INDENT = 18
