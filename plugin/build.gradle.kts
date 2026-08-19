@@ -54,6 +54,13 @@ tasks.named<RunIdeTask>("runIde") {
     // Flow Lens does not claim dynamic unload safety (IMPLEMENTATION_GUARDRAILS.md
     // section 16); restart the sandbox to pick up rebuilt jars.
     systemProperty("idea.auto.reload.plugins", "false")
+
+    // No locale override here, deliberately. Forcing -Duser.language triggers
+    // the platform's language-plugin detection, which offers to install a
+    // language pack and then restarts the IDE — and a Gradle-launched sandbox
+    // cannot restart itself, so the run dies with exit code 2. The locale the
+    // sandbox needs comes from the machine or from a language pack installed
+    // into the sandbox, never from a JVM argument.
 }
 
 tasks.buildSearchableOptions {

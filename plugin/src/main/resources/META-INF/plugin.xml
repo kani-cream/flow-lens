@@ -57,6 +57,17 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>1.0.0 — First release.</b></p>
+        <ul>
+            <li>No new capability, and that is the point: the feature set is
+            settled, and 1.0 is about the one thing Flow Lens does being
+            dependable. From a selected function, it maps execution forward and
+            shows the uncertainty and the analysis boundaries rather than
+            hiding them.</li>
+            <li>Everything below shipped during development and is listed so you
+            can see what the plugin grew from.</li>
+        </ul>
+
         <p><b>0.5.0 — Asynchronous semantics.</b></p>
         <ul>
             <li>A body handed to a call — a lambda, a Kotlin trailing lambda, a Go
