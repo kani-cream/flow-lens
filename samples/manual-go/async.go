@@ -14,9 +14,14 @@ package main
 //	⚡ { }                        H: goroutine — it may run at any time
 //	    charge()                     and its body is visible all the same
 //	handOff()
-//	⧖ { } → handOff()            not a keyword and not a documented API, so
-//	    tidy()                    the timing is not determined
+//	  ⧖ { } → handOff()          not a keyword and not a documented API, so
+//	      tidy()                     the timing is not determined
 //	respond()                    the next synchronous step
+//
+// Then analyze passedOn(): `go handOff(func(){...})` does NOT make that literal
+// a goroutine. Go evaluates the function value and its arguments in the calling
+// goroutine; what handOff does with the literal decides when it runs, so the
+// card must say the timing is not determined.
 //
 // Three things to check:
 //
@@ -40,6 +45,14 @@ func serveRequest() {
 	}()
 	handOff(func() {
 		tidy()
+	})
+	respond()
+}
+
+// The keyword applies to the function being invoked, not to its arguments.
+func passedOn() {
+	go handOff(func() {
+		charge()
 	})
 	respond()
 }

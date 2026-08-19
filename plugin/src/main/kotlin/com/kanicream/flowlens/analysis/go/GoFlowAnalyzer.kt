@@ -265,7 +265,15 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
         /**
          * `go func() { … }()` and `defer func() { … }()` hand a body to the
          * runtime. Go states the timing itself, so unlike Java there is nothing
-         * to look up: the call's own execution mode is the body's.
+         * to look up — but it states it about **the function being invoked**,
+         * not about its arguments.
+         *
+         * The Go specification is explicit: for a `go` statement "the function
+         * value and parameters are evaluated as usual in the calling goroutine",
+         * and a `defer` statement saves them the same way. So in
+         * `go helper(func() { … })` the literal is a value handed to `helper`,
+         * and when it runs depends on what `helper` does with it — which is
+         * exactly the thing this analyzer does not know.
          */
         private fun addCallbacks(call: GoCallExpr, mode: ExecutionMode) {
             val invokedInPlace = call.expression as? GoFunctionLit
@@ -274,29 +282,33 @@ class GoFlowAnalyzer : FlowLanguageAnalyzer {
                 addAll(call.argumentList.expressionList.filterIsInstance<GoFunctionLit>())
             }
             if (literals.isEmpty()) return
-            val timing = when (mode) {
+            // The keyword's timing belongs to the literal that is being called.
+            val invokedTiming = when (mode) {
                 ExecutionMode.GOROUTINE -> CallbackTiming.GOROUTINE
                 ExecutionMode.DEFERRED -> CallbackTiming.DEFERRED
-                // An immediately invoked literal runs right here.
-                else -> if (invokedInPlace != null) {
-                    CallbackTiming.IN_PLACE
-                } else {
-                    CallbackTiming.UNDETERMINED
-                }
+                else -> CallbackTiming.IN_PLACE
             }
-            for (literal in literals) {
+            val arguments = literals.filter { it !== invokedInPlace }
+            literals.forEachIndexed { index, literal ->
+                val handedOver = literal !== invokedInPlace
                 sink += ExtractedCallback(
                     body = literal,
                     // A body invoked where it is written was handed to nobody,
                     // so there is no receiver to name it after.
-                    receiverShortName = if (literal === invokedInPlace) {
-                        null
+                    receiverShortName = if (handedOver) calleeNameOf(call) else null,
+                    executionMode = if (handedOver) {
+                        CallbackTiming.UNDETERMINED.executionMode
                     } else {
-                        calleeNameOf(call)
+                        invokedTiming.executionMode
                     },
-                    executionMode = timing.executionMode,
-                    orderingStatus = timing.orderingStatus,
+                    orderingStatus = if (handedOver) {
+                        CallbackTiming.UNDETERMINED.orderingStatus
+                    } else {
+                        invokedTiming.orderingStatus
+                    },
                     conditional = conditionalDepth > 0,
+                    ordinal = if (handedOver) arguments.indexOf(literal) else 0,
+                    siblingCount = if (handedOver) arguments.size else 1,
                 )
             }
         }

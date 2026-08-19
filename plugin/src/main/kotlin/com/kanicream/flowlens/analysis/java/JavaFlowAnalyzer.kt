@@ -541,13 +541,15 @@ class JavaFlowAnalyzer : FlowLanguageAnalyzer {
             if (lambdas.isEmpty()) return
             val timing = KnownCallbackApis.javaTiming(qualifiedNameOf(resolve()))
                 ?: CallbackTiming.UNDETERMINED
-            for (lambda in lambdas) {
+            lambdas.forEachIndexed { index, lambda ->
                 sink += ExtractedCallback(
                     body = lambda,
                     receiverShortName = receiverName,
                     executionMode = timing.executionMode,
                     orderingStatus = timing.orderingStatus,
                     conditional = conditionalDepth > 0,
+                    ordinal = index,
+                    siblingCount = lambdas.size,
                 )
             }
         }

@@ -33,6 +33,7 @@ class GoCallbackTest : BasePlatformTestCase() {
         func cleanup() { }
         func audit() { }
         func helper(f func()) { }
+        func handOff(f func()) { }
         """.trimIndent(),
     )
 
@@ -77,6 +78,33 @@ class GoCallbackTest : BasePlatformTestCase() {
         val callback = items.filterIsInstance<ExtractedCallback>().single()
         assertEquals(ExecutionMode.DEFERRED, callback.executionMode)
         assertEquals(OrderingStatus.UNSPECIFIED, callback.orderingStatus)
+    }
+
+    fun `test go applies to the function being called, not to its arguments`() {
+        // The Go specification: for a `go` statement "the function value and
+        // parameters are evaluated as usual in the calling goroutine". So the
+        // literal is a value handed to helper, and when it runs depends on what
+        // helper does with it.
+        val callback = itemsOf("go handOff(func() { charge() })")
+            .filterIsInstance<ExtractedCallback>().single()
+        assertEquals(ExecutionMode.UNKNOWN, callback.executionMode)
+        assertEquals("handOff", callback.receiverShortName)
+    }
+
+    fun `test defer applies to the function being called, not to its arguments`() {
+        assertEquals(
+            ExecutionMode.UNKNOWN,
+            itemsOf("defer handOff(func() { cleanup() })")
+                .filterIsInstance<ExtractedCallback>().single().executionMode,
+        )
+    }
+
+    fun `test the keyword still applies to a literal that is itself invoked`() {
+        assertEquals(
+            ExecutionMode.GOROUTINE,
+            itemsOf("go func() { charge() }()")
+                .filterIsInstance<ExtractedCallback>().single().executionMode,
+        )
     }
 
     fun `test a closure handed to an ordinary function has undetermined timing`() {

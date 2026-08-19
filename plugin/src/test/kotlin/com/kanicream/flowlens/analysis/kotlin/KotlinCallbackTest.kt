@@ -38,6 +38,9 @@ class KotlinCallbackTest : LightJavaCodeInsightFixtureTestCase() {
         fun helper(block: () -> Unit) { }
         inline fun inlined(block: () -> Unit) { block() }
         inline fun escaping(noinline block: () -> Unit) { }
+        inline fun elsewhere(crossinline block: () -> Unit) { store { block() } }
+        inline fun mixed(first: () -> Unit, noinline second: () -> Unit) { first() }
+        fun store(block: () -> Unit) { }
         suspend fun save() { }
         $decls
         """.trimIndent(),
@@ -93,6 +96,36 @@ class KotlinCallbackTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(
             ExecutionMode.UNKNOWN,
             items.filterIsInstance<ExtractedCallback>().single().executionMode,
+        )
+    }
+
+    fun `test C crossinline allows another execution context, so nothing is promised`() {
+        // `crossinline` exists precisely so the lambda can be invoked from a local
+        // object, a nested function, or another thread — which is the case where
+        // "runs in place" would be a false claim.
+        val items = itemsOf("elsewhere { charge() }")
+        assertEquals(
+            ExecutionMode.UNKNOWN,
+            items.filterIsInstance<ExtractedCallback>().single().executionMode,
+        )
+    }
+
+    fun `test one noinline parameter does not cost the other lambda its guarantee`() {
+        val items = itemsOf("mixed({ charge() }, { audit() })")
+        val callbacks = items.filterIsInstance<ExtractedCallback>()
+        assertEquals(2, callbacks.size)
+        assertEquals(
+            "the promise is made per parameter, so it is read per parameter",
+            listOf(ExecutionMode.SYNC, ExecutionMode.UNKNOWN),
+            callbacks.map { it.executionMode },
+        )
+    }
+
+    fun `test named arguments are matched by name, not by position`() {
+        val items = itemsOf("mixed(second = { audit() }, first = { charge() })")
+        assertEquals(
+            listOf(ExecutionMode.UNKNOWN, ExecutionMode.SYNC),
+            items.filterIsInstance<ExtractedCallback>().map { it.executionMode },
         )
     }
 

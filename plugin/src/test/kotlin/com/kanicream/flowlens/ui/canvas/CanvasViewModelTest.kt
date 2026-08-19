@@ -249,6 +249,37 @@ class CanvasViewModelTest : BasePlatformTestCase() {
         )
     }
 
+    fun `test the boundary marker sits in the gap, clear of an attached body`() {
+        // Regression: the marker was drawn at the midpoint of the connector. Once
+        // that connector became a long one detouring around an attached body, its
+        // midpoint was beside the body and the label was drawn over it.
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("root"), null)
+        val call = b.addEvent(root, spec("submit"))!!
+        val callback = b.addEvent(
+            root,
+            spec("body", kind = FlowNodeKind.CALLBACK, dispatch = DispatchConfidence.EXACT)
+                .copy(attachedTo = call),
+        )!!
+        val childFrame = b.openChildFrame(root, callback, symbol("body"), null)
+        b.addEvent(childFrame, spec("charge"))
+        b.addEvent(root, spec("post", resolution = ResolutionStatus.EXTERNAL))
+
+        val cards = CanvasViewModelBuilder
+            .build(b.snapshot(FlowResultStatus.COMPLETED), expandedNodes = setOf(callback))!!.cards
+        val attached = cards[1]
+        val external = cards[2]
+        assertTrue("the fixture must actually attach a body", attached.attached)
+        assertTrue("and the marker must have something to clear", attached.occupiedBottom > attached.bounds.y)
+
+        val markerY = CanvasMetrics.boundaryMarkerY(external.bounds.y)
+        assertTrue(
+            "the label would be drawn over the attached body",
+            markerY > attached.occupiedBottom,
+        )
+        assertTrue("and it belongs above the card it describes", markerY < external.bounds.y)
+    }
+
     fun `test one line cards keep the flow as short as the sequence allows`() {
         val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
         val root = b.openRootFrame(symbol("root"), null)

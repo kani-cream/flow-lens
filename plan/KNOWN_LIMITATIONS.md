@@ -548,6 +548,10 @@ draws them in source order because it has to draw them somewhere. Position is
 not a claim about sequence — the same rule as `VISUAL_DESIGN.md` §19 — and their
 dashed connectors are what says so.
 
+Two bodies handed to *one* call are told apart by their position in the argument
+list, shown as `#1` and `#2`. That is an identity, not an order: it says which
+argument each body was, not which runs first.
+
 ---
 
 ## 45. Only a body written in place is a callback (v0.5)
@@ -568,7 +572,21 @@ and the honest reason it is open is scope rather than difficulty.
 
 ---
 
-## 46. Maintenance rule
+## 46. Kotlin `callsInPlace` contracts are not read (v0.5 hardening)
+
+`SYNC` for Kotlin is justified by the `inline` rule alone. A function that
+declares `kotlin.contracts` `callsInPlace` — the compiler-checked statement that
+a lambda runs during the call — is not consulted, so its lambda falls to
+`UNKNOWN`.
+
+This costs precision, never correctness: the unread contract can only move an
+answer from `UNKNOWN` towards `SYNC`, so not reading it errs in the safe
+direction. The spec listed it as a justification before it was implemented; the
+spec now says deferred. A candidate for v1.x.
+
+---
+
+## 47. Maintenance rule
 
 Whenever dogfooding, fixture testing, Plugin Verifier, or a user report reveals a surprising but currently accepted behavior:
 

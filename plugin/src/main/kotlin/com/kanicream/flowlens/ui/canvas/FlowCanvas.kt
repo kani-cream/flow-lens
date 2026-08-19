@@ -349,18 +349,26 @@ class FlowCanvas : JComponent() {
     }
 
     private fun paintCardSequence(g2: Graphics2D, cards: List<CardVM>, bodyTop: Int) {
+        // Two predecessors, because a callback is drawn in the column without
+        // being a link in it: `previous` is whatever card sits above, and `chain`
+        // is the last card the sequence actually ran through.
         var previous: CardVM? = null
+        var chain: CardVM? = null
         for (card in cards) {
-            if (previous == null) {
+            val from = if (card.attached) previous else chain
+            if (from == null) {
                 if (card.dashedIncomingConnector || card.boundaryBeforeCard) {
                     paintLeadIn(g2, card, bodyTop)
                 }
             } else {
-                paintConnector(g2, previous, card)
+                // Attached cards came between, so the connector goes around them
+                // rather than through: what follows the call follows the call.
+                paintConnector(g2, from, card, detour = !card.attached && previous !== from)
             }
             paintCardTree(g2, card)
             if (card.depthLimited) paintDepthLimitStub(g2, card)
             previous = card
+            if (!card.attached) chain = card
         }
     }
 
@@ -381,7 +389,9 @@ class FlowCanvas : JComponent() {
             intArrayOf(yEnd - 6, yEnd - 6, yEnd - 1),
             3,
         )
-        if (card.boundaryBeforeCard) paintBoundaryMarker(g2, x, (bodyTop + yEnd) / 2)
+        if (card.boundaryBeforeCard) {
+            paintBoundaryMarker(g2, x, CanvasMetrics.boundaryMarkerY(card.bounds.y))
+        }
     }
 
     /**
@@ -449,9 +459,15 @@ class FlowCanvas : JComponent() {
      * previous call owns — including an expanded body — so the line always
      * expresses "the next step in this frame", never a call made by nested code.
      */
-    private fun paintConnector(g2: Graphics2D, from: CardVM, to: CardVM) {
+    private fun paintConnector(g2: Graphics2D, from: CardVM, to: CardVM, detour: Boolean = false) {
         val fromBottom = from.occupiedBottom
-        val x = from.containerBounds.x + from.containerBounds.width / 2
+        // A detour runs down the gutter that the attached cards' indent opens up,
+        // so the line is beside them instead of appearing to pass through them.
+        val x = if (detour) {
+            from.containerBounds.x + CanvasMetrics.CHILD_INDENT / 2
+        } else {
+            from.containerBounds.x + from.containerBounds.width / 2
+        }
         val yEnd = to.bounds.y
         g2.color = Palette.connector
         g2.stroke = if (to.dashedIncomingConnector) DASHED_STROKE else SOLID_STROKE
@@ -461,7 +477,9 @@ class FlowCanvas : JComponent() {
             intArrayOf(yEnd - 6, yEnd - 6, yEnd - 1),
             3,
         )
-        if (to.boundaryBeforeCard) paintBoundaryMarker(g2, x, (fromBottom + yEnd) / 2)
+        if (to.boundaryBeforeCard) {
+            paintBoundaryMarker(g2, x, CanvasMetrics.boundaryMarkerY(to.bounds.y))
+        }
     }
 
     /** Local project-boundary crossing (VISUAL_DESIGN.md section 11). */

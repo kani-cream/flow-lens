@@ -40,6 +40,7 @@ import com.kanicream.flowlens.workflow.FlowEntryResolver
 import com.kanicream.flowlens.dispatch.CandidateFinder
 import com.kanicream.flowlens.analysis.ExtractedCallback
 import com.kanicream.flowlens.core.model.FlowSymbol
+import com.kanicream.flowlens.core.model.NodeId
 import com.kanicream.flowlens.core.model.ResolutionStatus
 import com.kanicream.flowlens.core.model.RunId
 import com.kanicream.flowlens.core.model.SourceOrigin
@@ -257,10 +258,13 @@ internal class FlowAnalysisRun(
         task: PendingFrame,
         items: List<ComputedItem>,
     ): Boolean {
+        // Extraction emits a call and then the bodies handed to it, so the last
+        // call appended is the one a callback belongs to.
+        var owner: NodeId? = null
         for (item in items) {
             val complete = when (item) {
-                is ComputedCall -> appendCall(builder, queue, task, item)
-                is ComputedCallback -> appendCallback(builder, queue, task, item)
+                is ComputedCall -> appendCall(builder, queue, task, item) { owner = it }
+                is ComputedCallback -> appendCallback(builder, queue, task, item, owner)
                 is ComputedTerminator -> appendTerminator(builder, task, item)
                 is ComputedStructure -> appendStructure(builder, queue, task, item)
             }
@@ -279,6 +283,7 @@ internal class FlowAnalysisRun(
         queue: PendingFrameQueue,
         task: PendingFrame,
         callback: ComputedCallback,
+        owner: NodeId?,
     ): Boolean {
         val depthExceeded = task.depth + 1 > limits.maxDepth
         val metadata = buildMap {
@@ -299,6 +304,10 @@ internal class FlowAnalysisRun(
                 executionMode = callback.executionMode,
                 orderingStatus = callback.orderingStatus,
                 metadata = metadata,
+                // What follows the call follows the call, not the body it was
+                // handed. Adjacency alone would let the canvas and the exports
+                // each decide that differently (`V0.5_SPEC.md` §5.5).
+                attachedTo = owner.takeIf { callback.receiver != null },
             ),
         )
         nodesProduced = builder.nodeCount
@@ -327,13 +336,23 @@ internal class FlowAnalysisRun(
      * distinguishable. A body invoked where it is written has no such call, and
      * naming it after itself would say less than the braces already do.
      */
-    private fun callbackSymbol(languageId: String, receiver: String?): FlowSymbol =
-        FlowSymbol(
+    private fun callbackSymbol(
+        languageId: String,
+        receiver: String?,
+        ordinal: Int,
+        siblingCount: Int,
+    ): FlowSymbol {
+        val name = receiver?.let { "{ } → $it()" } ?: "{ }"
+        return FlowSymbol(
             languageId = languageId,
-            displayName = receiver?.let { "{ } → $it()" } ?: "{ }",
+            // One call can be handed several bodies, and then its name alone
+            // identifies neither. Their order in the argument list is the only
+            // thing that separates them, so it is what the card shows.
+            displayName = if (siblingCount > 1) "$name #${ordinal + 1}" else name,
             containerName = null,
-            key = "$languageId:callback#${receiver ?: "in-place"}",
+            key = "$languageId:callback#${receiver ?: "in-place"}#$ordinal",
         )
+    }
 
     private fun appendTerminator(
         builder: FlowModelBuilder,
@@ -390,6 +409,7 @@ internal class FlowAnalysisRun(
         queue: PendingFrameQueue,
         task: PendingFrame,
         call: ComputedCall,
+        onAppended: (NodeId) -> Unit,
     ): Boolean {
         val isCycle = call.cycleKey != null && task.path.contains(call.cycleKey)
         val depthExceeded = call.recursable && !isCycle && task.depth + 1 > limits.maxDepth
@@ -414,6 +434,7 @@ internal class FlowAnalysisRun(
             return false
         }
         countResolution(spec)
+        onAppended(nodeId)
         nodesProduced = builder.nodeCount
         if (call.recursable && !isCycle && !depthExceeded &&
             call.childSymbol != null && call.childEntryLocation != null
@@ -480,6 +501,7 @@ internal class FlowAnalysisRun(
      * and answers when it runs (`V0.5_SPEC.md` §3).
      */
     private class ComputedCallback(
+        val receiver: String?,
         val symbol: FlowSymbol,
         val location: FlowLocation?,
         val executionMode: ExecutionMode,
@@ -555,7 +577,13 @@ internal class FlowAnalysisRun(
                 metadata = item.metadata,
             )
             is ExtractedCallback -> ComputedCallback(
-                symbol = callbackSymbol(analyzer.languageId, item.receiverShortName),
+                receiver = item.receiverShortName,
+                symbol = callbackSymbol(
+                    analyzer.languageId,
+                    item.receiverShortName,
+                    item.ordinal,
+                    item.siblingCount,
+                ),
                 location = handles.locationOf(item.body),
                 executionMode = item.executionMode,
                 orderingStatus = item.orderingStatus,

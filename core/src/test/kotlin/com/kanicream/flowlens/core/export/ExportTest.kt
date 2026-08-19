@@ -100,6 +100,69 @@ class ExportTest {
         return b.snapshot(FlowResultStatus.COMPLETED)
     }
 
+    /** `run() { submit(); { } → submit(); save() }`, with the body attached. */
+    private fun attachedFlow(): FlowAnalysisResult {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        val submit = b.addEvent(root, call("submit"))!!
+        val callback = b.addEvent(
+            root,
+            FlowEventSpec(
+                kind = FlowNodeKind.CALLBACK,
+                callSiteLocation = location(3),
+                targetSymbol = FlowSymbol("java", "{ } \u2192 submit()", null, "java:callback#submit#0"),
+                resolutionStatus = ResolutionStatus.PROJECT_LOCAL,
+                dispatchConfidence = null,
+                executionMode = ExecutionMode.ASYNC,
+                orderingStatus = OrderingStatus.UNSPECIFIED,
+                attachedTo = submit,
+            ),
+        )!!
+        val body = b.openChildFrame(root, callback, symbol("lambda"), null)
+        b.addEvent(body, call("charge"))
+        b.addEvent(root, call("save"))
+        return b.snapshot(FlowResultStatus.COMPLETED)
+    }
+
+    @Test
+    fun `an asynchronous body is drawn off the call, not in the sequence`() {
+        // Regression: every node advanced the frontier, so the edge into save()
+        // came from the callback — which says "once the body has run, save()".
+        // For an asynchronous body that is the opposite of what is known.
+        val mermaid = MermaidExporter.export(request(attachedFlow()))
+        val id = Regex("""\s*(n\d+)\["([^"]+)"]""")
+            .findAll(mermaid)
+            .associate { it.groupValues[2] to it.groupValues[1] }
+        val submit = id.entries.first { it.key.startsWith("submit()") }.value
+        val callback = id.entries.first { it.key.startsWith("{ }") }.value
+        val save = id.entries.first { it.key.startsWith("save()") }.value
+
+        assertTrue(
+            mermaid.lines().any { it.trimStart().startsWith(submit) && it.endsWith(callback) },
+            "the body hangs off the call it was handed to\n$mermaid",
+        )
+        assertTrue(
+            mermaid.lines().any { it.trimStart().startsWith(submit) && it.endsWith(save) },
+            "what follows the call follows the call\n$mermaid",
+        )
+        assertFalse(
+            mermaid.lines().any { it.trimStart().startsWith(callback) && it.endsWith(save) },
+            "nothing may claim that save() waits for the body\n$mermaid",
+        )
+    }
+
+    @Test
+    fun `Markdown writes an attached body under its call, not beside it`() {
+        val markdown = MarkdownExporter.export(request(attachedFlow()))
+        val lines = markdown.lines()
+        val callback = lines.first { it.contains("{ }") }
+        val save = lines.first { it.contains("save()") }
+        assertTrue(
+            callback.takeWhile { it == ' ' }.length > save.takeWhile { it == ' ' }.length,
+            "a sibling bullet would put the body in the sequence\n$markdown",
+        )
+    }
+
     @Test
     fun `R an asynchronous body says so in words in both formats`() {
         val request = request(callbackFlow(ExecutionMode.ASYNC))

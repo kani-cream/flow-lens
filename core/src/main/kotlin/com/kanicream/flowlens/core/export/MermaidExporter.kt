@@ -3,6 +3,7 @@ package com.kanicream.flowlens.core.export
 import com.kanicream.flowlens.core.model.DispatchConfidence
 import com.kanicream.flowlens.core.model.ExecutionMode
 import com.kanicream.flowlens.core.model.FlowNode
+import com.kanicream.flowlens.core.model.NodeId
 import com.kanicream.flowlens.core.model.FlowNodeKind
 import com.kanicream.flowlens.core.model.OrderingStatus
 import com.kanicream.flowlens.core.model.ResolutionStatus
@@ -36,6 +37,9 @@ object MermaidExporter {
 
         /** Where each callable was first drawn, so a cycle can point back at it. */
         private val idsByKey = mutableMapOf<String, String>()
+
+        /** Node identity, so an attached body can name the call it belongs to. */
+        private val idsByNode = mutableMapOf<NodeId, String>()
 
         private class Subgraph(val id: String, val title: String, val members: MutableList<String>)
 
@@ -77,7 +81,18 @@ object MermaidExporter {
 
                 val id = declare(label(node, request))
                 node.targetSymbol?.key?.let { register(it, id) }
-                frontier.forEach { edges += "  $it${edge(node)}$id" }
+                idsByNode[node.id] = id
+
+                // A body handed to a call hangs off that call. Drawing it in the
+                // sequence would put whatever follows the call after the body
+                // instead, which for an asynchronous one reverses the meaning
+                // (`V0.5_SPEC.md` §5.5).
+                val owner = node.attachedTo?.let { idsByNode[it] }
+                if (owner != null) {
+                    edges += "  $owner${edge(node)}$id"
+                } else {
+                    frontier.forEach { edges += "  $it${edge(node)}$id" }
+                }
 
                 val body = node.targetFrameId?.let(request.result::frame)
                 if (body != null && body.events.isNotEmpty()) {
@@ -86,6 +101,8 @@ object MermaidExporter {
                     walk(body.events, from = setOf(id))
                 }
 
+                // An attached body is not where the sequence continues from.
+                if (owner != null) continue
                 frontier = if (node.branches.isEmpty()) {
                     setOf(id)
                 } else {

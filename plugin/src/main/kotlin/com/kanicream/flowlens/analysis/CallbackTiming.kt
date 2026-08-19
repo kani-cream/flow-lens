@@ -40,7 +40,20 @@ data class CallbackTiming(
  */
 object KnownCallbackApis {
 
-    /** Java methods that invoke the lambda before returning. */
+    /**
+     * Java methods that invoke the lambda before returning, and say so.
+     *
+     * Deliberately short. Three kinds of near-miss were removed after review,
+     * because each would have stated a time the API does not promise:
+     *
+     * - `Stream.map`/`filter`/`peek` are *intermediate* operations. They are lazy
+     *   by contract: nothing runs until a terminal operation starts the pipeline,
+     *   which may be in another statement entirely, or never.
+     * - `Executor.execute` may run the command "in a new thread, in a pooled
+     *   thread, or in the calling thread, at the discretion of the Executor".
+     * - `new Thread(runnable)` starts nothing; the body runs if and when
+     *   somebody calls `start()`.
+     */
     private val JAVA_IN_PLACE: Set<String> = setOf(
         "java.lang.Iterable.forEach",
         "java.util.Map.forEach",
@@ -49,10 +62,10 @@ object KnownCallbackApis {
         "java.util.Optional.filter",
         "java.util.Optional.ifPresent",
         "java.util.Optional.orElseGet",
-        "java.util.stream.Stream.map",
-        "java.util.stream.Stream.filter",
+        // Terminal: it runs the action before returning. For a parallel stream
+        // the actions may run on several threads, but the call still returns
+        // only once they are done, which is what ordering is about here.
         "java.util.stream.Stream.forEach",
-        "java.util.stream.Stream.peek",
         "java.util.Map.computeIfAbsent",
         "java.util.Map.computeIfPresent",
         "java.util.Map.compute",
@@ -60,19 +73,26 @@ object KnownCallbackApis {
         "java.util.Collection.removeIf",
     )
 
-    /** Java methods that hand the lambda to another thread. */
+    /**
+     * Java methods whose contract is that the body runs somewhere else.
+     *
+     * `ExecutorService` is documented as producing futures "for tracking progress
+     * of one or more asynchronous tasks", and the `*Async` methods of
+     * `CompletableFuture` are documented as using an asynchronous execution
+     * facility. Plain `Executor.execute` is not here: its contract explicitly
+     * allows the calling thread.
+     */
     private val JAVA_ASYNC: Set<String> = setOf(
         "java.util.concurrent.ExecutorService.submit",
-        "java.util.concurrent.Executor.execute",
         "java.util.concurrent.ScheduledExecutorService.schedule",
         "java.util.concurrent.ScheduledExecutorService.scheduleAtFixedRate",
+        "java.util.concurrent.ScheduledExecutorService.scheduleWithFixedDelay",
         "java.util.concurrent.CompletableFuture.supplyAsync",
         "java.util.concurrent.CompletableFuture.runAsync",
         "java.util.concurrent.CompletableFuture.thenApplyAsync",
         "java.util.concurrent.CompletableFuture.thenAcceptAsync",
         "java.util.concurrent.CompletableFuture.thenRunAsync",
         "java.util.concurrent.CompletableFuture.thenComposeAsync",
-        "java.lang.Thread.Thread",
     )
 
     /** Coroutine builders that start concurrent work. */
