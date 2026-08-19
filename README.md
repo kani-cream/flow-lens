@@ -134,9 +134,18 @@ Verified in the sandbox IDE; checks in a production IDE are scheduled for v1.0.
 
 Development through v0.3 happened in a private repository, which this one
 replaces. The commits are the same, with authorship rewritten to a GitHub
-noreply address, so **`Merge pull request #1`–`#6` in the log refer to that
-predecessor and not to any pull request here.** Their review history stayed
-private with it; what was decided and verified is in the `plan/*_RESULTS.md`
-documents rather than in pull request threads.
+noreply address.
 
-Pull request numbering here starts fresh.
+Pull request numbering started fresh here, so **the log contains two sets of
+`Merge pull request #1`–`#6`**. The commit
+`64b07f1 docs: say what the pre-migration pull request numbers refer to` is the
+divider: merges *below* it belong to the predecessor and lead nowhere, merges
+*above* it are pull requests in this repository.
+
+The predecessor's review history stayed private with it; what was decided and
+verified is in the `plan/*_RESULTS.md` documents rather than in pull request
+threads.
+
+## License
+
+[Apache License 2.0](LICENSE). Copyright 2026 kani-cream — see [NOTICE](NOTICE).

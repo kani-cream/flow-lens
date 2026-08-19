@@ -1,0 +1,13 @@
+<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+  <!-- Magnifying glass: the same construction as Repo Lens's pluginIcon.svg,
+       so the two plugins read as siblings in a plugin list. Only what sits
+       inside the lens differs. -->
+  <circle cx="17.5" cy="17.5" r="10.5" fill="none" stroke="#3B5BDB" stroke-width="3.2"/>
+  <line x1="25.4" y1="25.4" x2="34.2" y2="34.2" stroke="#3B5BDB" stroke-width="3.6" stroke-linecap="round"/>
+  <!-- One step flowing into the next: the direction is the whole point, since
+       Flow Lens follows execution forward from the callable you selected. -->
+  <line x1="17.5" y1="14.3" x2="17.5" y2="17.6" stroke="#3B5BDB" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M17.5 20.8 L15.3 17.1 L19.7 17.1 Z" fill="#3B5BDB"/>
+  <circle cx="17.5" cy="11.8" r="2.3" fill="#F59E0B"/>
+  <circle cx="17.5" cy="23.5" r="2.3" fill="#F59E0B"/>
+</svg>
