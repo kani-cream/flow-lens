@@ -4,19 +4,56 @@
     <vendor>kani-cream</vendor>
 
     <description><![CDATA[
-        <p>Flow Lens turns a selected function or method into an explorable static
-        execution-flow map. Select a method, see where the code flows, and jump back
-        to the source at any point.</p>
+        <p><b>Flow Lens turns a selected function into an explorable map of what runs
+        next.</b> Put the caret in a method, run <b>Analyze Flow</b>, and read the
+        execution path forward from there. Every step leads back to the source.</p>
 
-        <p>Flow Lens follows reachable explicit calls within bounded limits, preserves
-        meaningful evaluation order, exposes uncertainty instead of hiding it, and
-        renders the result as a navigable Flow Canvas.</p>
+        <p>It is a reading tool for unfamiliar code, debugging, review, and onboarding.
+        It is not a repository-wide analyzer and not a runtime tracer: it follows
+        explicit calls in the source, within a depth and node budget you control, and
+        marks every place it stopped rather than trailing off.</p>
 
-        <p><b>Languages</b>: Java, Kotlin, and Go (when the JetBrains Go plugin is
-        installed). Analysis may cross Java/Kotlin boundaries.</p>
+        <p><b>What it shows</b></p>
+        <ul>
+            <li><b>Real evaluation order.</b> <code>save(convert(load()))</code> reads
+            as load, then convert, then save — not as the order the text is written in.
+            Chained calls follow the receiver chain; arguments evaluate left to
+            right.</li>
 
-        <p>Flow Lens is local-first: it calls no AI API, requires no server, and sends
-        nothing anywhere.</p>
+            <li><b>Control flow as structure.</b> Conditions, switches, loops, and try
+            blocks are drawn as containers with labelled branches, and the sequence
+            resumes after them instead of hanging off one branch.</li>
+
+            <li><b>Uncertainty, stated rather than hidden.</b> Every call carries a
+            resolution status and a dispatch confidence. A virtual call that may be
+            overridden at runtime says so; an interface call with no single responsible
+            continuation stops rather than guessing — and you can choose which
+            implementation to follow, with the card still reporting the confidence it
+            actually has.</li>
+
+            <li><b>Asynchronous timing.</b> A lambda, a Kotlin trailing lambda, or a Go
+            closure handed to a call becomes a step of its own with a body you can open,
+            and it says when it runs: in place, concurrently, as a goroutine, deferred —
+            or that the timing could not be determined, which is stated rather than left
+            for you to assume.</li>
+
+            <li><b>Somewhere to work from.</b> Pin the functions you keep returning to,
+            save a flow together with the limits it was analyzed at, re-open recent ones,
+            and export any flow as Markdown or as a Mermaid diagram for a review or an
+            issue.</li>
+        </ul>
+
+        <p><b>Languages</b>: Java, Kotlin, and Go (Go requires the JetBrains Go plugin).
+        One flow may cross Java/Kotlin boundaries, because the analyzer is chosen per
+        resolved target rather than once for the whole run.</p>
+
+        <p><b>Where it runs</b>: Flow Lens needs an IDE with Java support. It is
+        developed and verified against IntelliJ IDEA Ultimate; other JetBrains IDEs may
+        work but are not verified targets.</p>
+
+        <p><b>Local-first</b>: no AI service, no server, no network calls. Nothing you
+        analyze leaves your machine, and the logs hold counts and timings rather than
+        your source.</p>
     ]]></description>
 
     <change-notes><![CDATA[
