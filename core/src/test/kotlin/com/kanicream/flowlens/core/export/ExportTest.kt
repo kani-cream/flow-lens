@@ -249,6 +249,26 @@ class ExportTest {
     }
 
     @Test
+    fun `a simplified body is counted in the export, not just announced`() {
+        // The status area says how many bodies were simplified and selects one.
+        // This string drifted out of step with it and no test noticed, which is
+        // how "the export says what the status area says" quietly stopped being
+        // true for one line.
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        val call = b.addEvent(root, call("check"))!!
+        val body = b.openChildFrame(root, call, symbol("check"), null)
+        b.addEvent(body, call("audit"))
+        b.markControlFlowSimplified(body)
+
+        val markdown = MarkdownExporter.export(request(b.snapshot(FlowResultStatus.COMPLETED)))
+        assertTrue(
+            markdown.contains("control flow simplified in 1 of the bodies shown"),
+            "a count the reader can act on, not a bare warning\n$markdown",
+        )
+    }
+
+    @Test
     fun `L exporting twice produces identical text`() {
         val request = request()
         assertEquals(MarkdownExporter.export(request), MarkdownExporter.export(request))

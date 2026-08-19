@@ -447,7 +447,7 @@ Defaults:
 
 ```text
 Max method/function depth      3
-Max persistent semantic nodes 100
+Max persistent semantic nodes 250
 Include tests                 OFF
 Include libraries             OFF
 ```
@@ -456,7 +456,14 @@ Depth counts callable-body crossings only. Conditions and visual containers do n
 
 ### Node counting
 
-The 100-node budget counts persistent semantic model nodes.
+The node budget counts persistent semantic model nodes.
+
+The default was 100 through v0.5, taken from Milestone 0 where it was the size a
+feasibility demo laid out quickly rather than a limit anyone had reached. The
+first real project reached it at once — an ordinary Go login handler needs 157
+nodes to complete — so v1.0 raised it to 250 on measurement: 800 nodes still lay
+out in 9 ms, and a frame's children are collapsed, so 157 nodes is roughly 22
+cards on screen. Node count and reading effort are not the same quantity.
 
 Transient UI-only states such as a temporary `resolving…` indicator do not count.
 
