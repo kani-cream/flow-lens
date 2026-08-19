@@ -619,7 +619,20 @@ prevent; the count stands in for them there.
 
 ---
 
-## 50. Maintenance rule
+## 50. A Japanese sandbox breaks the release build until it is reset (v1.0)
+
+Choosing Japanese in the sandbox IDE persists `selectedLocale` into the sandbox
+config, and `buildSearchableOptions` reads the same config and refuses to run
+with `Locale must be default`. The searchable-options index is only built for
+the distribution, so CI and ordinary builds are unaffected — but a release build
+after a Japanese pass fails until the setting is removed.
+
+Three build-level fixes were tried and none took effect. It is written up as a
+step in `LOCALIZATION.md` §6 rather than left as a surprise.
+
+---
+
+## 51. Maintenance rule
 
 Whenever dogfooding, fixture testing, Plugin Verifier, or a user report reveals a surprising but currently accepted behavior:
 
