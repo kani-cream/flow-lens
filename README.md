@@ -43,6 +43,15 @@ onboarding, and investigation.
 - **Local-first.** No AI service, no server, no network calls, and logs that
   contain counts and timings rather than your source.
 
+## Installing
+
+Flow Lens is distributed through the JetBrains Marketplace:
+<https://plugins.jetbrains.com/plugin/33650-flow-lens>
+
+In IntelliJ IDEA Ultimate, open **Settings → Plugins → Marketplace**, search for
+**Flow Lens**, and install. Updates arrive through the IDE's normal plugin
+update channel. Go analysis additionally needs the JetBrains Go plugin.
+
 ## Using it
 
 1. Put the caret inside a Java, Kotlin, or Go function or method.
