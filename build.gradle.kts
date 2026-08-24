@@ -12,7 +12,7 @@ allprojects {
     group = "com.kanicream.flowlens"
     // v1.0: the feature set is settled; what is left is making it safe to rely
     // on daily (plan/PLAN.md section 17).
-    version = "1.0.0"
+    version = "1.1.0"
 }
 
 subprojects {
