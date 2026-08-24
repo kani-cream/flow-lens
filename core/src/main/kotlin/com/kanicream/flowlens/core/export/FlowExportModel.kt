@@ -57,6 +57,8 @@ data class ExportStrings(
     val reasonDepthLimited: String = "Not entered — depth limit: {0}",
     val reasonUnresolved: String = "Could not be resolved: {0}",
     val reasonExternal: String = "Outside the project: {0}",
+    /** Calls the hide-external option removed (`V1.1_HIDE_EXTERNAL_SPEC.md` §5). */
+    val reasonHiddenExternal: String = "Hidden by settings — outside the project: {0}",
     val reasonCycle: String = "Already on this path: {0}",
     /** Structure kinds, keyed by [com.kanicream.flowlens.core.model.FlowNodeKind] name. */
     val kinds: Map<String, String> = emptyMap(),

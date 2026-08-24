@@ -49,6 +49,7 @@ class FlowLensRecents : PersistentStateComponent<FlowLensRecents.State> {
                 maxNodes = recent.maxNodes,
                 includeTests = recent.includeTests,
                 includeLibraries = recent.includeLibraries,
+                hideExternalCalls = recent.hideExternalCalls,
             ),
         )
     }
@@ -65,6 +66,7 @@ class FlowLensRecents : PersistentStateComponent<FlowLensRecents.State> {
             maxNodes = limits.maxNodes
             includeTests = limits.includeTests
             includeLibraries = limits.includeLibraries
+            hideExternalCalls = limits.hideExternalCalls
         }
         synchronized(lock) {
             state.recents = (listOf(entry) + state.recents.filterNot { it.entry?.id == ref.id })

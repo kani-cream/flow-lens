@@ -24,6 +24,7 @@ class FlowLensSettings : PersistentStateComponent<FlowLensSettings.State> {
         var maxNodes: Int = FlowLimits.DEFAULT_MAX_NODES
         var includeTests: Boolean = false
         var includeLibraries: Boolean = false
+        var hideExternalCalls: Boolean = false
     }
 
     private var state = State()
@@ -44,6 +45,7 @@ class FlowLensSettings : PersistentStateComponent<FlowLensSettings.State> {
         maxNodes = state.maxNodes.coerceIn(MIN_NODES, MAX_NODES),
         includeTests = state.includeTests,
         includeLibraries = state.includeLibraries,
+        hideExternalCalls = state.hideExternalCalls,
     )
 
     companion object {

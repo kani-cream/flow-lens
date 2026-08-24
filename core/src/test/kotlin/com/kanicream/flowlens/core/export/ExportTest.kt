@@ -587,4 +587,16 @@ class ExportTest {
         assertEquals("", MarkdownExporter.export(empty))
         assertEquals("", MermaidExporter.export(empty))
     }
+
+    @Test
+    fun `hidden external calls are disclosed even though they left no node`() {
+        val b = FlowModelBuilder(RunId(1), FlowLimits(), 0)
+        val root = b.openRootFrame(symbol("run"), null)
+        b.addEvent(root, call("mine"))
+        b.recordHiddenExternalCalls(2)
+        val markdown = MarkdownExporter.export(
+            ExportRequest(b.snapshot(FlowResultStatus.COMPLETED), ExportContext()),
+        )
+        assertTrue(markdown.contains("Hidden by settings \u2014 outside the project: 2"), markdown)
+    }
 }

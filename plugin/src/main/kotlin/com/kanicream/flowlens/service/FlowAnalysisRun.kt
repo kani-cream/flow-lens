@@ -263,7 +263,7 @@ internal class FlowAnalysisRun(
         // Extraction emits a call and then the bodies handed to it, so the last
         // call appended is the one a callback belongs to.
         var owner: NodeId? = null
-        for (item in grouped(items)) {
+        for (item in presentable(builder, items)) {
             val complete = when (item) {
                 is ComputedCall -> appendCall(builder, queue, task, item) { owner = it }
                 is ComputedCallback -> appendCallback(builder, queue, task, item, owner)
@@ -274,6 +274,26 @@ internal class FlowAnalysisRun(
             if (!complete) return false
         }
         return true
+    }
+
+    /**
+     * What the reader sees of [items]: external calls removed when the setting
+     * asks for it (`V1.1_HIDE_EXTERNAL_SPEC.md` §4), then runs of library
+     * calls collapsed into groups. Hiding runs first, so a hidden run leaves no
+     * group behind and costs no node budget.
+     */
+    private fun presentable(
+        builder: FlowModelBuilder,
+        items: List<ComputedItem>,
+    ): List<ComputedItem> {
+        if (!limits.hideExternalCalls) return grouped(items)
+        val hiding = ExternalCallHiding.hide(
+            items = items,
+            hideable = { (it as? ComputedCall)?.hideable == true },
+            attachedCallback = { it is ComputedCallback && it.receiver != null },
+        )
+        builder.recordHiddenExternalCalls(hiding.hiddenCount)
+        return grouped(hiding.visible)
     }
 
     /**
@@ -559,6 +579,15 @@ internal class FlowAnalysisRun(
             languageId = spec.targetSymbol?.languageId,
             container = spec.targetSymbol?.containerName,
         )
+
+        /**
+         * Whether the hide-external option may remove this call: outside the
+         * project, and no body of it on the map (`V1.1_HIDE_EXTERNAL_SPEC.md` §3).
+         */
+        val hideable: Boolean =
+            (spec.resolutionStatus == ResolutionStatus.EXTERNAL ||
+                spec.resolutionStatus == ResolutionStatus.BUILT_IN) &&
+                !(recursable && childEntryLocation != null)
     }
 
     /**

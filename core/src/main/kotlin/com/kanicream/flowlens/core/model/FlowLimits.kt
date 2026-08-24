@@ -9,6 +9,12 @@ data class FlowLimits(
     val maxNodes: Int = DEFAULT_MAX_NODES,
     val includeTests: Boolean = false,
     val includeLibraries: Boolean = false,
+    /**
+     * Removes external calls that were not entered from the map entirely, so a
+     * complex flow reads as the reader's own code (`V1.1_HIDE_EXTERNAL_SPEC.md`).
+     * Off by default: `V1.0_GROUPING_SPEC.md` §2 is why hiding must be a choice.
+     */
+    val hideExternalCalls: Boolean = false,
 ) {
     init {
         require(maxDepth >= 1) { "maxDepth must be >= 1" }

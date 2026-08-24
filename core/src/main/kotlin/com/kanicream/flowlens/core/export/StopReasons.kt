@@ -26,6 +26,11 @@ internal object StopReasons {
             // A group stands for its members and is not a call of its own (§5.4).
             count(nodes) { it.resolutionStatus == ResolutionStatus.EXTERNAL && !it.isGroup }
                 ?.let { add(format(s.reasonExternal, it)) }
+            // Hidden calls left no node, so the count rides on the result
+            // (`V1.1_HIDE_EXTERNAL_SPEC.md` §5): a map with calls removed must
+            // say so, or absence would read as "nothing was called".
+            request.result.hiddenExternalCount.takeIf { it > 0 }
+                ?.let { add(format(s.reasonHiddenExternal, it)) }
             count(nodes) { it.kind == FlowNodeKind.CYCLE }
                 ?.let { add(format(s.reasonCycle, it)) }
             count(nodes) { it.kind == FlowNodeKind.LIMIT }?.let { add(s.truncated) }

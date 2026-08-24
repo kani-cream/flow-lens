@@ -14,9 +14,16 @@ data class FlowAnalysisResult(
     val controlFlowIncomplete: Boolean,
     val sourceRevision: Long,
     val diagnostics: List<FlowDiagnostic>,
+    /**
+     * Calls the hide-external option removed (`V1.1_HIDE_EXTERNAL_SPEC.md` §5).
+     * They left no node, so the count rides on the result: a map with calls
+     * removed must say so, or absence would read as "nothing was called".
+     */
+    val hiddenExternalCount: Int = 0,
 ) {
     init {
         require(nodeCount >= 0) { "nodeCount must be >= 0" }
+        require(hiddenExternalCount >= 0) { "hiddenExternalCount must be >= 0" }
         if (rootFrameId != null) {
             require(frames.containsKey(rootFrameId)) { "rootFrameId must reference a known frame" }
         }

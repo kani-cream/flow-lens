@@ -88,6 +88,19 @@ class FlowModelBuilder(
     var wasTruncated: Boolean = false
         private set
 
+    /**
+     * Calls the hide-external option removed (`V1.1_HIDE_EXTERNAL_SPEC.md` §5).
+     * Counted here so every snapshot of the run carries the same disclosure the
+     * final one does.
+     */
+    var hiddenExternalCount: Int = 0
+        private set
+
+    fun recordHiddenExternalCalls(count: Int) {
+        require(count >= 0) { "a hidden-call count must be >= 0" }
+        hiddenExternalCount += count
+    }
+
     val nodeCount: Int get() = budget.used
     val frameCount: Int get() = frames.size
 
@@ -319,6 +332,7 @@ class FlowModelBuilder(
             controlFlowIncomplete = controlFlowIncomplete,
             sourceRevision = sourceRevision,
             diagnostics = diagnostics.toList(),
+            hiddenExternalCount = hiddenExternalCount,
         )
 
     private fun newFrame(symbol: FlowSymbol, entryLocation: FlowLocation?, depth: Int): FrameId {
