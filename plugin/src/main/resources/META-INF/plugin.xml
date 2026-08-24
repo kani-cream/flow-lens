@@ -37,6 +37,11 @@
             or that the timing could not be determined, which is stated rather than left
             for you to assume.</li>
 
+            <li><b>Your code, or everything.</b> Repetitive runs of library
+            calls collapse into one card by default, and a setting can hide calls
+            to code outside the project entirely — with the map saying how many it
+            removed, so an absence never reads as "nothing was called".</li>
+
             <li><b>Somewhere to work from.</b> Pin the functions you keep returning to,
             save a flow together with the limits it was analyzed at, re-open recent ones,
             and export any flow as Markdown or as a Mermaid diagram for a review or an
@@ -57,6 +62,20 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <p><b>1.1.0 — Hide external calls.</b></p>
+        <ul>
+            <li>A new setting — <em>Hide calls to code outside the project</em>,
+            off by default — removes library and built-in calls that were not
+            entered from the map entirely, so a complex flow reads as your own
+            code. Hidden calls cost no node budget, which goes to your functions
+            instead.</li>
+            <li>A call handed a lambda or function literal keeps its card, so
+            your own body stays where it belongs; unresolved calls always
+            stay.</li>
+            <li>The removal is disclosed rather than silent: the status area and
+            both exports say how many calls were hidden.</li>
+        </ul>
+
         <p><b>1.0.0 — First release.</b></p>
         <ul>
             <li>No new capability, and that is the point: the feature set is
