@@ -132,6 +132,7 @@ object FlowStatusModel {
                 // times (`V1.0_GROUPING_SPEC.md` §5.4).
                 it.resolutionStatus == ResolutionStatus.EXTERNAL && !it.isGroup
             },
+            hiddenExternalReason(result),
             reason("status.reason.cycle", nodes) { it.kind == FlowNodeKind.CYCLE },
             reason("status.reason.truncated", nodes) { it.kind == FlowNodeKind.LIMIT },
             // Not a reason the map stops, but the same kind of disclosure: a body
@@ -140,6 +141,23 @@ object FlowStatusModel {
                 it.kind == FlowNodeKind.CALLBACK && it.executionMode == ExecutionMode.UNKNOWN
             },
             simplifiedControlFlowReason(result),
+        )
+    }
+
+    /**
+     * Calls the hide-external setting removed (`V1.1_HIDE_EXTERNAL_SPEC.md` §5).
+     * They left no node to select, so unlike the other reasons this one is a
+     * disclosure rather than an entry point.
+     */
+    private fun hiddenExternalReason(result: FlowAnalysisResult): StopReason? {
+        if (result.hiddenExternalCount <= 0) return null
+        return StopReason(
+            text = FlowLensBundle.message(
+                "status.reason.hidden.external",
+                result.hiddenExternalCount,
+            ),
+            count = result.hiddenExternalCount,
+            firstNode = null,
         )
     }
 

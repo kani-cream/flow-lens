@@ -20,6 +20,7 @@ class FlowLensSettingsTest : BasePlatformTestCase() {
         assertEquals(FlowLimits.DEFAULT_MAX_NODES, snapshot.maxNodes)
         assertFalse(snapshot.includeTests)
         assertFalse(snapshot.includeLibraries)
+        assertFalse(snapshot.hideExternalCalls)
     }
 
     fun `test persisted state round trips`() {
@@ -28,6 +29,7 @@ class FlowLensSettingsTest : BasePlatformTestCase() {
             maxNodes = 250
             includeTests = true
             includeLibraries = true
+            hideExternalCalls = true
         }
         settings.loadState(loaded)
         val snapshot = settings.snapshot()
@@ -35,6 +37,7 @@ class FlowLensSettingsTest : BasePlatformTestCase() {
         assertEquals(250, snapshot.maxNodes)
         assertTrue(snapshot.includeTests)
         assertTrue(snapshot.includeLibraries)
+        assertTrue(snapshot.hideExternalCalls)
     }
 
     fun `test out of range persisted values are clamped instead of breaking analysis`() {

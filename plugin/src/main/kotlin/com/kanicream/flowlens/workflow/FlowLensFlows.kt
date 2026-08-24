@@ -49,6 +49,7 @@ class SavedFlowState {
     var maxNodes: Int = FlowLimits.DEFAULT_MAX_NODES
     var includeTests: Boolean = false
     var includeLibraries: Boolean = false
+    var hideExternalCalls: Boolean = false
 }
 
 /** A saved flow as the UI uses it. */
@@ -132,6 +133,7 @@ class FlowLensFlows : PersistentStateComponent<FlowLensFlows.State> {
                 maxNodes = saved.maxNodes,
                 includeTests = saved.includeTests,
                 includeLibraries = saved.includeLibraries,
+                hideExternalCalls = saved.hideExternalCalls,
             ),
         )
     }
@@ -145,6 +147,7 @@ class FlowLensFlows : PersistentStateComponent<FlowLensFlows.State> {
             maxNodes = limits.maxNodes
             includeTests = limits.includeTests
             includeLibraries = limits.includeLibraries
+            hideExternalCalls = limits.hideExternalCalls
         }
         synchronized(lock) {
             state.saved = (state.saved.filterNot { it.entry?.id == ref.id } + entry).toMutableList()

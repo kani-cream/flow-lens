@@ -33,6 +33,7 @@ class FlowStatusModelTest : BasePlatformTestCase() {
         status: FlowResultStatus,
         controlFlowIncomplete: Boolean = false,
         diagnostics: List<FlowDiagnostic> = emptyList(),
+        hiddenExternalCount: Int = 0,
     ) = FlowAnalysisResult(
         runId = RunId(1),
         status = status,
@@ -42,6 +43,7 @@ class FlowStatusModelTest : BasePlatformTestCase() {
         controlFlowIncomplete = controlFlowIncomplete,
         sourceRevision = 0,
         diagnostics = diagnostics,
+        hiddenExternalCount = hiddenExternalCount,
     )
 
     fun `test idle state before any analysis`() {
@@ -162,5 +164,15 @@ class FlowStatusModelTest : BasePlatformTestCase() {
         val state = FlowStatusModel.stateOf(null, result(FlowResultStatus.STALE))
         assertEquals(StatusTone.WARNING, state.tone)
         assertTrue(state.reanalyzeEnabled)
+    }
+    fun `test hidden external calls surface as a stop reason without a target`() {
+        val state = FlowStatusModel.stateOf(
+            null,
+            result(FlowResultStatus.COMPLETED, hiddenExternalCount = 4),
+        )
+        val reason = state.stopReasons.single()
+        assertNull("there is no node to select, only a disclosure", reason.firstNode)
+        assertEquals(4, reason.count)
+        assertTrue(reason.text.contains("4"))
     }
 }

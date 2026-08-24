@@ -71,6 +71,7 @@ object FlowExport {
             reasonDepthLimited = FlowLensBundle.message("status.reason.depth.limited", "{0}"),
             reasonUnresolved = FlowLensBundle.message("status.reason.unresolved", "{0}"),
             reasonExternal = FlowLensBundle.message("status.reason.external", "{0}"),
+            reasonHiddenExternal = FlowLensBundle.message("status.reason.hidden.external", "{0}"),
             reasonCycle = FlowLensBundle.message("status.reason.cycle", "{0}"),
             kinds = FlowNodeKind.entries.associate {
                 it.name to FlowLensBundle.message("enum.kind.${it.name}")

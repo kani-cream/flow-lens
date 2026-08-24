@@ -56,6 +56,13 @@ class FlowLensConfigurable(private val project: Project) : BoundConfigurable(DIS
             row {
                 comment(FlowLensBundle.message("settings.include.libraries.comment"))
             }
+            row {
+                checkBox(FlowLensBundle.message("settings.hide.external"))
+                    .bindSelected({ state.hideExternalCalls }, { state.hideExternalCalls = it })
+            }
+            row {
+                comment(FlowLensBundle.message("settings.hide.external.comment"))
+            }
         }
     }
 

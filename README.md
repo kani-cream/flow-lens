@@ -66,8 +66,10 @@ Keyboard: `↑`/`↓` move, `→`/`←` expand and collapse, `Space` toggles,
 selection.
 
 Settings live under **Settings → Tools → Flow Lens**: max call depth (default 3),
-max semantic nodes (default 250), and whether traversal may enter test or
-library sources (both off).
+max semantic nodes (default 250), whether traversal may enter test or
+library sources (both off), and whether calls to code outside the project are
+hidden from the map entirely (off; the hidden count is disclosed in the status
+area and in exports).
 
 ## Building
 
